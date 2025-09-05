@@ -9,7 +9,11 @@
 #include <ngx_core.h>
 
 
+/**
+ * 本模块的配置结构体
+ */
 typedef struct {
+    //配置指令pcre_jit
     ngx_flag_t   pcre_jit;
     ngx_list_t  *studies;
 } ngx_regex_conf_t;
@@ -83,6 +87,9 @@ static ngx_uint_t              ngx_regex_match_data_size;
 #endif
 
 
+/**
+ * main函数调用，初始化正则表达式模块
+ */
 void
 ngx_regex_init(void)
 {
@@ -173,6 +180,8 @@ ngx_regex_compile(ngx_regex_compile_t *rc)
 
     ngx_regex_malloc_init(rc->pool);
 
+    /**
+     */
     re = pcre2_compile(rc->pattern.data, rc->pattern.len, options,
                        &errcode, &erroff, ngx_regex_compile_context);
 
@@ -291,8 +300,17 @@ ngx_regex_compile(ngx_regex_compile_t *rc)
         return NGX_ERROR;
     }
 
+     // 设置编译所需要的内存
     ngx_regex_malloc_init(rc->pool);
 
+    /**
+     * 将一个正则表达式编译为一个内部结构，匹配多个字符串时可以加快匹配速度。
+     * pattern: 包含正则表达式的c字符串
+     * options: 0或者其他参数选项
+     * errptr: 返回的错误信息
+     * erroffset: 正则表达式错误偏移
+     * tableptr: 字符数组或空
+     */
     re = pcre_compile((const char *) rc->pattern.data, (int) options,
                       &errstr, &erroff, NULL);
 
@@ -335,6 +353,7 @@ ngx_regex_compile(ngx_regex_compile_t *rc)
         elt->name = rc->pattern.data;
     }
 
+     // 需要捕获结果的个数
     n = pcre_fullinfo(re, NULL, PCRE_INFO_CAPTURECOUNT, &rc->captures);
     if (n < 0) {
         p = "pcre_fullinfo(\"%V\", PCRE_INFO_CAPTURECOUNT) failed: %d";
@@ -345,6 +364,8 @@ ngx_regex_compile(ngx_regex_compile_t *rc)
         return NGX_OK;
     }
 
+    // 捕获结果设置别名的个数
+    // test/(?<t1>.+)/(.+)/     --->捕获2个变量，设置了别名的是1个
     n = pcre_fullinfo(re, NULL, PCRE_INFO_NAMECOUNT, &rc->named_captures);
     if (n < 0) {
         p = "pcre_fullinfo(\"%V\", PCRE_INFO_NAMECOUNT) failed: %d";
@@ -355,12 +376,16 @@ ngx_regex_compile(ngx_regex_compile_t *rc)
         return NGX_OK;
     }
 
+    //  捕获数组每个元素的大小
+    //  以0结尾最长的别名的长度+16bit的捕获序号。
+    //  例如?<srv> 这个别名的长度为6，而该结果取的是整个编译好的re中的最大的长度。
     n = pcre_fullinfo(re, NULL, PCRE_INFO_NAMEENTRYSIZE, &rc->name_size);
     if (n < 0) {
         p = "pcre_fullinfo(\"%V\", PCRE_INFO_NAMEENTRYSIZE) failed: %d";
         goto failed;
     }
 
+    //  指向捕获数组首地址
     n = pcre_fullinfo(re, NULL, PCRE_INFO_NAMETABLE, &rc->names);
     if (n < 0) {
         p = "pcre_fullinfo(\"%V\", PCRE_INFO_NAMETABLE) failed: %d";
@@ -452,6 +477,13 @@ failed:
 
 #else
 
+/**
+ * 单个正则匹配，
+ *  re为编译出来的正则表达式
+ *  s 为待匹配的字符串
+ *  可容纳任何匹配成功数组  captures 的以及数组的大小
+ *  匹配成功captures数组的大小必须是三的倍数，
+ */
 ngx_int_t
 ngx_regex_exec(ngx_regex_t *re, ngx_str_t *s, int *captures, ngx_uint_t size)
 {
@@ -462,6 +494,19 @@ ngx_regex_exec(ngx_regex_t *re, ngx_str_t *s, int *captures, ngx_uint_t size)
 #endif
 
 
+/**
+ * 执行正则匹配
+ * a为多个正则组成的动态数组，列表元素为ngx_regex_elt_t
+ * s为待匹配的字符串
+ * 
+ * 命中任意一个a中的正则，即返回NGX_OK
+ * 
+ * 该函数对待匹配字符串使用数组中的正则表达式，进行遍历匹配，直到找到匹配或无法匹配为止。
+ * 
+ * 如果有匹配返回NGX_OK，
+ * 否则为NGX_DECLINED 
+ * 或者在错误时 NGX_ERROR
+ */
 ngx_int_t
 ngx_regex_exec_array(ngx_array_t *a, ngx_str_t *s, ngx_log_t *log)
 {
@@ -471,15 +516,16 @@ ngx_regex_exec_array(ngx_array_t *a, ngx_str_t *s, ngx_log_t *log)
 
     re = a->elts;
 
+    //遍历动态数组，逐个匹配
     for (i = 0; i < a->nelts; i++) {
 
         n = ngx_regex_exec(re[i].regex, s, NULL, 0);
 
-        if (n == NGX_REGEX_NO_MATCHED) {
+        if (n == NGX_REGEX_NO_MATCHED) {    //未命中
             continue;
         }
 
-        if (n < 0) {
+        if (n < 0) {        //匹配错误
             ngx_log_error(NGX_LOG_ALERT, log, 0,
                           ngx_regex_exec_n " failed: %i on \"%V\" using \"%s\"",
                           n, s, re[i].name);
@@ -488,7 +534,7 @@ ngx_regex_exec_array(ngx_array_t *a, ngx_str_t *s, ngx_log_t *log)
 
         /* match */
 
-        return NGX_OK;
+        return NGX_OK;  //命中
     }
 
     return NGX_DECLINED;
@@ -715,6 +761,9 @@ ngx_regex_module_init(ngx_cycle_t *cycle)
 }
 
 
+/**
+ * 创建配置结构体
+ */
 static void *
 ngx_regex_create_conf(ngx_cycle_t *cycle)
 {

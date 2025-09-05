@@ -318,6 +318,14 @@ static ngx_http_module_t  ngx_http_ssl_module_ctx = {
 };
 
 
+/**
+ * https://nginx.org/en/docs/http/ngx_http_ssl_module.html
+ * 
+ * provides the necessary support for HTTPS
+ * 
+ * 非默认启用，依赖OpenSSL library  ,启用: ./configure --with-http_ssl_module
+ * 
+ */
 ngx_module_t  ngx_http_ssl_module = {
     NGX_MODULE_V1,
     &ngx_http_ssl_module_ctx,              /* module context */

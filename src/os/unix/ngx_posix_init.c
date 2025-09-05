@@ -10,12 +10,16 @@
 #include <nginx.h>
 
 
+//sysconf(_SC_NPROCESSORS_ONLN);
 ngx_int_t   ngx_ncpu;
+//getrlimit(RLIMIT_NOFILE, &rlmt) rlimit.rlim_cur;
 ngx_int_t   ngx_max_sockets;
+//
 ngx_uint_t  ngx_inherited_nonblocking;
 ngx_uint_t  ngx_tcp_nodelay_and_tcp_nopush;
 
 
+//getrlimit(RLIMIT_NOFILE, &rlmt)
 struct rlimit  rlmt;
 
 
@@ -31,6 +35,10 @@ ngx_os_io_t ngx_os_io = {
 };
 
 
+/**
+ * main函数调用
+ * 初始化系统相关变量，如内存页面大小ngx_pagesize,ngx_cacheline_size,ngx_ncpu, 最大连接数ngx_max_sockets等
+ */
 ngx_int_t
 ngx_os_init(ngx_log_t *log)
 {
@@ -41,6 +49,7 @@ ngx_os_init(ngx_log_t *log)
 #endif
 
 #if (NGX_HAVE_OS_SPECIFIC_INIT)
+    //每种操作系统都有特定的实现, 如solaris/posix/unix/freebsd/darwin
     if (ngx_os_specific_init(log) != NGX_OK) {
         return NGX_ERROR;
     }
@@ -98,6 +107,10 @@ ngx_os_init(ngx_log_t *log)
 }
 
 
+/**
+ * main函数调用
+ * 
+ */
 void
 ngx_os_status(ngx_log_t *log)
 {

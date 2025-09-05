@@ -190,6 +190,9 @@ static ngx_http_module_t  ngx_http_ssi_filter_module_ctx = {
 };
 
 
+/**
+ * 默认关闭，过滤SSI请求，可以发起子请求，去获取include进来的文件
+ */
 ngx_module_t  ngx_http_ssi_filter_module = {
     NGX_MODULE_V1,
     &ngx_http_ssi_filter_module_ctx,       /* module context */

@@ -51,6 +51,9 @@ static ngx_core_module_t  ngx_errlog_module_ctx = {
 };
 
 
+/**
+ * 是ngx_modules数组中的第二个模块
+ */
 ngx_module_t  ngx_errlog_module = {
     NGX_MODULE_V1,
     &ngx_errlog_module_ctx,                /* module context */
@@ -74,14 +77,14 @@ ngx_uint_t              ngx_use_stderr = 1;
 
 static ngx_str_t err_levels[] = {
     ngx_null_string,
-    ngx_string("emerg"),
+    ngx_string("emerg"),      //1
     ngx_string("alert"),
     ngx_string("crit"),
     ngx_string("error"),
     ngx_string("warn"),
     ngx_string("notice"),
     ngx_string("info"),
-    ngx_string("debug")
+    ngx_string("debug")     //8
 };
 
 static const char *debug_levels[] = {
@@ -92,6 +95,7 @@ static const char *debug_levels[] = {
 
 #if (NGX_HAVE_VARIADIC_MACROS)
 
+//实现了错误日志记录的核心功能，ngx_log_error和ngx_log_debug宏只是对其进行了简单的封装
 void
 ngx_log_error_core(ngx_uint_t level, ngx_log_t *log, ngx_err_t err,
     const char *fmt, ...)
@@ -112,11 +116,14 @@ ngx_log_error_core(ngx_uint_t level, ngx_log_t *log, ngx_err_t err,
     ngx_uint_t   wrote_stderr, debug_connection;
     u_char       errstr[NGX_MAX_ERROR_STR];
 
+    // 2k的buffer
     last = errstr + NGX_MAX_ERROR_STR;
 
+    // 日期时间
     p = ngx_cpymem(errstr, ngx_cached_err_log_time.data,
                    ngx_cached_err_log_time.len);
 
+    // 日志等级
     p = ngx_slprintf(p, last, " [%V] ", &err_levels[level]);
 
     /* pid#tid */
@@ -127,11 +134,12 @@ ngx_log_error_core(ngx_uint_t level, ngx_log_t *log, ngx_err_t err,
         p = ngx_slprintf(p, last, "*%uA ", log->connection);
     }
 
-    msg = p;
+    msg = p;    // 真正的错误消息的开始
 
 #if (NGX_HAVE_VARIADIC_MACROS)
 
     va_start(args, fmt);
+     // 错误消息
     p = ngx_vslprintf(p, last, fmt, args);
     va_end(args);
 
@@ -142,6 +150,7 @@ ngx_log_error_core(ngx_uint_t level, ngx_log_t *log, ngx_err_t err,
 #endif
 
     if (err) {
+        // 发生错误，会展示系统错误
         p = ngx_log_errno(p, last, err);
     }
 
@@ -153,6 +162,7 @@ ngx_log_error_core(ngx_uint_t level, ngx_log_t *log, ngx_err_t err,
         p = last - NGX_LINEFEED_SIZE;
     }
 
+     // 添加回车换行
     ngx_linefeed(p);
 
     wrote_stderr = 0;
@@ -202,6 +212,8 @@ ngx_log_error_core(ngx_uint_t level, ngx_log_t *log, ngx_err_t err,
         return;
     }
 
+     // 需要向标准错误输出日志
+     // 用“nginx:[等级]”替换掉开始的“时间 [等级] tid#pid 等
     msg -= (7 + err_levels[level].len + 3);
 
     (void) ngx_sprintf(msg, "nginx: [%V] ", &err_levels[level]);
@@ -314,6 +326,10 @@ ngx_log_errno(u_char *buf, u_char *last, ngx_err_t err)
 }
 
 
+/**
+ * main函数调用，
+ * 初始化全局变量ngx_log, 打开错误日志文件(默认为$NGX_PREFIX/$NGX_ERROR_LOG_PATH)
+ */
 ngx_log_t *
 ngx_log_init(u_char *prefix, u_char *error_log)
 {
@@ -324,6 +340,7 @@ ngx_log_init(u_char *prefix, u_char *error_log)
     ngx_log.log_level = NGX_LOG_NOTICE;
 
     if (error_log == NULL) {
+        //默认位置: logs/error.log
         error_log = (u_char *) NGX_ERROR_LOG_PATH;
     }
 
@@ -343,11 +360,13 @@ ngx_log_init(u_char *prefix, u_char *error_log)
     if (name[0] != '/') {
 #endif
 
+        //非绝对路径
         if (prefix) {
             plen = ngx_strlen(prefix);
 
         } else {
 #ifdef NGX_PREFIX
+            //NGX_PREFIX 是根据configure指令 --prefix=xxx 生成的
             prefix = (u_char *) NGX_PREFIX;
             plen = ngx_strlen(prefix);
 #else
@@ -373,6 +392,7 @@ ngx_log_init(u_char *prefix, u_char *error_log)
         }
     }
 
+    //打开文件
     ngx_log_file.fd = ngx_open_file(name, NGX_FILE_APPEND,
                                     NGX_FILE_CREATE_OR_OPEN,
                                     NGX_FILE_DEFAULT_ACCESS);
@@ -398,15 +418,20 @@ ngx_log_init(u_char *prefix, u_char *error_log)
 }
 
 
+/**
+ * ngx_init_cycle 方法调用，
+ */
 ngx_int_t
 ngx_log_open_default(ngx_cycle_t *cycle)
 {
     ngx_log_t  *log;
 
+    //遍历head链表，找到第一个log->file不为NULL的返回。
     if (ngx_log_get_file_log(&cycle->new_log) != NULL) {
         return NGX_OK;
     }
 
+    //0 为 NGX_LOG_STDERR
     if (cycle->new_log.log_level != 0) {
         /* there are some error logs, but no files */
 
@@ -427,6 +452,7 @@ ngx_log_open_default(ngx_cycle_t *cycle)
         return NGX_ERROR;
     }
 
+    // 根据log_level, 将new_log插入log组成的链表，log_level值越小(日志级别越高)，越靠前
     if (log != &cycle->new_log) {
         ngx_log_insert(&cycle->new_log, log);
     }
@@ -435,11 +461,15 @@ ngx_log_open_default(ngx_cycle_t *cycle)
 }
 
 
+/**
+ * 将日志输出重定向到标准错误输出
+ */
 ngx_int_t
 ngx_log_redirect_stderr(ngx_cycle_t *cycle)
 {
     ngx_fd_t  fd;
 
+    //如果配置文件中设置了error_log为stderr，则不重定向
     if (cycle->log_use_stderr) {
         return NGX_OK;
     }
@@ -447,7 +477,9 @@ ngx_log_redirect_stderr(ngx_cycle_t *cycle)
     /* file log always exists when we are called */
     fd = ngx_log_get_file_log(cycle->log)->file->fd;
 
+    //如果fd不是ngx_stderr
     if (fd != ngx_stderr) {
+        //执行的是 dup2(fd, STDERR_FILENO)
         if (ngx_set_stderr(fd) == NGX_FILE_ERROR) {
             ngx_log_error(NGX_LOG_ALERT, cycle->log, ngx_errno,
                           ngx_set_stderr_n " failed");
@@ -460,6 +492,9 @@ ngx_log_redirect_stderr(ngx_cycle_t *cycle)
 }
 
 
+/**
+ * 遍历head链表，找到第一个log->file不为NULL的返回
+ */
 ngx_log_t *
 ngx_log_get_file_log(ngx_log_t *head)
 {
@@ -538,6 +573,11 @@ ngx_log_set_levels(ngx_conf_t *cf, ngx_log_t *log)
 }
 
 
+/**
+ * error_log 配置指令处理函数
+ * 
+ * error_log file [level];
+ */
 static char *
 ngx_error_log(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -573,6 +613,7 @@ ngx_log_set_log(ngx_conf_t *cf, ngx_log_t **head)
 
     value = cf->args->elts;
 
+    //输出到stderr
     if (ngx_strcmp(value[1].data, "stderr") == 0) {
         ngx_str_null(&name);
         cf->cycle->log_use_stderr = 1;
@@ -673,11 +714,16 @@ ngx_log_set_log(ngx_conf_t *cf, ngx_log_t **head)
 }
 
 
+/**
+ * 根据log_level, 将new_log插入log组成的链表
+ * log_level值越小(日志级别越高)，越靠前
+ */
 static void
 ngx_log_insert(ngx_log_t *log, ngx_log_t *new_log)
 {
     ngx_log_t  tmp;
 
+    //将new_log插入log链表队首
     if (new_log->log_level > log->log_level) {
 
         /*
@@ -693,7 +739,9 @@ ngx_log_insert(ngx_log_t *log, ngx_log_t *new_log)
         return;
     }
 
+    //遍历log链表，查找首个日志级别低于new_log的log, 插入到其前边
     while (log->next) {
+        //找到
         if (new_log->log_level > log->next->log_level) {
             new_log->next = log->next;
             log->next = new_log;
@@ -703,6 +751,7 @@ ngx_log_insert(ngx_log_t *log, ngx_log_t *new_log)
         log = log->next;
     }
 
+    //到达log链表末尾，即本条日志就是级别最低的
     log->next = new_log;
 }
 

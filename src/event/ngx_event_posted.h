@@ -14,6 +14,9 @@
 #include <ngx_event.h>
 
 
+/**
+ * 将事件ev加入队列q队尾， ngx_event_process_posted()函数被调用以处理事件队列。它调用事件处理程序，直到队列不为空为止
+ */
 #define ngx_post_event(ev, q)                                                 \
                                                                               \
     if (!(ev)->posted) {                                                      \
@@ -28,6 +31,9 @@
     }
 
 
+/**
+ * 将事件ev从q中移除
+ */
 #define ngx_delete_posted_event(ev)                                           \
                                                                               \
     (ev)->posted = 0;                                                         \

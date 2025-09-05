@@ -1,0 +1,33 @@
+#0  ngx_linux_sendfile_chain (c=0x7f6b48e311e0, in=0x1608258, limit=2097152) at src/os/unix/ngx_linux_sendfile_chain.c:63
+#1  0x00000000004a9aa6 in ngx_http_write_filter (r=0x16072c0, in=0x7ffc6a01cde0) at src/http/ngx_http_write_filter_module.c:299
+#2  0x00000000004ab332 in ngx_http_chunked_body_filter (r=0x16072c0, in=0x7ffc6a01cde0) at src/http/modules/ngx_http_chunked_filter_module.c:115
+#3  0x00000000004add7e in ngx_http_gzip_body_filter (r=0x16072c0, in=0x7ffc6a01cde0) at src/http/modules/ngx_http_gzip_filter_module.c:310
+#4  0x00000000004af7e4 in ngx_http_postpone_filter (r=0x16072c0, in=0x7ffc6a01cde0) at src/http/ngx_http_postpone_filter_module.c:91
+#5  0x00000000004b0240 in ngx_http_ssi_body_filter (r=0x16072c0, in=0x7ffc6a01cde0) at src/http/modules/ngx_http_ssi_filter_module.c:440
+#6  0x00000000004b6430 in ngx_http_charset_body_filter (r=0x16072c0, in=0x7ffc6a01cde0) at src/http/modules/ngx_http_charset_filter_module.c:557
+#7  0x00000000004ba572 in ngx_http_trailers_filter (r=0x16072c0, in=0x7ffc6a01cde0) at src/http/modules/ngx_http_headers_filter_module.c:264
+#8  0x000000000041955b in ngx_output_chain (ctx=0x15fda60, in=0x7ffc6a01cde0) at src/core/ngx_output_chain.c:70
+#9  0x00000000004bb989 in ngx_http_copy_filter (r=0x16072c0, in=0x7ffc6a01cde0) at src/http/ngx_http_copy_filter_module.c:145
+#10 0x00000000004acd26 in ngx_http_range_body_filter (r=0x16072c0, in=0x7ffc6a01cde0) at src/http/modules/ngx_http_range_filter_module.c:651
+#11 0x000000000046f0f7 in ngx_http_output_filter (r=0x16072c0, in=0x7ffc6a01cde0) at src/http/ngx_http_core_module.c:1871
+#12 0x00000000004bca28 in ngx_http_static_handler (r=0x16072c0) at src/http/modules/ngx_http_static_module.c:277
+#13 0x000000000046dda7 in ngx_http_core_content_phase (r=0x16072c0, ph=0x1611260) at src/http/ngx_http_core_module.c:1275
+#14 0x000000000046d111 in ngx_http_core_run_phases (r=0x16072c0) at src/http/ngx_http_core_module.c:882
+#15 0x000000000046d07e in ngx_http_handler (r=0x16072c0) at src/http/ngx_http_core_module.c:865
+#16 0x0000000000470893 in ngx_http_internal_redirect (r=0x16072c0, uri=0x7ffc6a01d030, args=0x1607608) at src/http/ngx_http_core_module.c:2560
+#17 0x00000000004bf880 in ngx_http_index_handler (r=0x16072c0) at src/http/modules/ngx_http_index_module.c:277
+#18 0x000000000046dda7 in ngx_http_core_content_phase (r=0x16072c0, ph=0x1611230) at src/http/ngx_http_core_module.c:1275
+#19 0x000000000046d111 in ngx_http_core_run_phases (r=0x16072c0) at src/http/ngx_http_core_module.c:882
+#20 0x000000000046d07e in ngx_http_handler (r=0x16072c0) at src/http/ngx_http_core_module.c:865
+#21 0x000000000047c2c8 in ngx_http_process_request (r=0x16072c0) at src/http/ngx_http_request.c:2164
+#22 0x000000000047abea in ngx_http_process_request_headers (rev=0x1617da0) at src/http/ngx_http_request.c:1553
+#23 0x000000000047a153 in ngx_http_process_request_line (rev=0x1617da0) at src/http/ngx_http_request.c:1220
+#24 0x0000000000478c32 in ngx_http_wait_request_handler (rev=0x1617da0) at src/http/ngx_http_request.c:523
+#25 0x0000000000455df3 in ngx_epoll_process_events (cycle=0x15eede0, timer=60000, flags=1) at src/event/modules/ngx_epoll_module.c:901
+#26 0x0000000000446aee in ngx_process_events_and_timers (cycle=0x15eede0) at src/event/ngx_event.c:248
+#27 0x0000000000453a75 in ngx_worker_process_cycle (cycle=0x15eede0, data=0x0) at src/os/unix/ngx_process_cycle.c:721
+#28 0x0000000000450b5b in ngx_spawn_process (cycle=0x15eede0, proc=0x4539c7 <ngx_worker_process_cycle>, data=0x0,
+    name=0x4f8dff "worker process", respawn=-3) at src/os/unix/ngx_process.c:199
+#29 0x0000000000452d8b in ngx_start_worker_processes (cycle=0x15eede0, n=1, type=-3) at src/os/unix/ngx_process_cycle.c:344
+#30 0x00000000004525d4 in ngx_master_process_cycle (cycle=0x15eede0) at src/os/unix/ngx_process_cycle.c:130
+#31 0x0000000000411e05 in main (argc=1, argv=0x7ffc6a01d988) at src/core/nginx.c:384

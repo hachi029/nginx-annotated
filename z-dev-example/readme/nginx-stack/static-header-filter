@@ -1,0 +1,34 @@
+第三方过滤模块一般在ngx_http_headers_filter_module模块之后、 ngx_http_userid_filter_module模块之前
+
+#0  ngx_http_write_filter (r=0x16072c0, in=0x7ffc6a01cab0) at src/http/ngx_http_write_filter_module.c:57
+#1  0x00000000004ab0f4 in ngx_http_header_filter (r=0x16072c0) at src/http/ngx_http_header_filter_module.c:624
+#2  0x00000000004ab2de in ngx_http_chunked_header_filter (r=0x16072c0) at src/http/modules/ngx_http_chunked_filter_module.c:100
+#3  0x00000000004ac0af in ngx_http_range_header_filter (r=0x16072c0) at src/http/modules/ngx_http_range_filter_module.c:265
+#4  0x00000000004adad6 in ngx_http_gzip_header_filter (r=0x16072c0) at src/http/modules/ngx_http_gzip_filter_module.c:240
+#5  0x00000000004afe1a in ngx_http_ssi_header_filter (r=0x16072c0) at src/http/modules/ngx_http_ssi_filter_module.c:341
+#6  0x00000000004b597e in ngx_http_charset_header_filter (r=0x16072c0) at src/http/modules/ngx_http_charset_filter_module.c:236
+#7  0x00000000004b8c1b in ngx_http_userid_filter (r=0x16072c0) at src/http/modules/ngx_http_userid_filter_module.c:239
+#8  0x00000000004ba289 in ngx_http_headers_filter (r=0x16072c0) at src/http/modules/ngx_http_headers_filter_module.c:183
+#9  0x00000000004bbd70 in ngx_http_not_modified_header_filter (r=0x16072c0) at src/http/modules/ngx_http_not_modified_filter_module.c:108
+#10 0x000000000046f0c2 in ngx_http_send_header (r=0x16072c0) at src/http/ngx_http_core_module.c:1856
+#11 0x00000000004bc8ac in ngx_http_static_handler (r=0x16072c0) at src/http/modules/ngx_http_static_module.c:255
+#12 0x000000000046dda7 in ngx_http_core_content_phase (r=0x16072c0, ph=0x1611260) at src/http/ngx_http_core_module.c:1275
+#13 0x000000000046d111 in ngx_http_core_run_phases (r=0x16072c0) at src/http/ngx_http_core_module.c:882
+#14 0x000000000046d07e in ngx_http_handler (r=0x16072c0) at src/http/ngx_http_core_module.c:865
+#15 0x0000000000470893 in ngx_http_internal_redirect (r=0x16072c0, uri=0x7ffc6a01d030, args=0x1607608) at src/http/ngx_http_core_module.c:2560
+#16 0x00000000004bf880 in ngx_http_index_handler (r=0x16072c0) at src/http/modules/ngx_http_index_module.c:277
+#17 0x000000000046dda7 in ngx_http_core_content_phase (r=0x16072c0, ph=0x1611230) at src/http/ngx_http_core_module.c:1275
+#18 0x000000000046d111 in ngx_http_core_run_phases (r=0x16072c0) at src/http/ngx_http_core_module.c:882
+#19 0x000000000046d07e in ngx_http_handler (r=0x16072c0) at src/http/ngx_http_core_module.c:865
+#20 0x000000000047c2c8 in ngx_http_process_request (r=0x16072c0) at src/http/ngx_http_request.c:2164
+#21 0x000000000047abea in ngx_http_process_request_headers (rev=0x1617da0) at src/http/ngx_http_request.c:1553
+#22 0x000000000047a153 in ngx_http_process_request_line (rev=0x1617da0) at src/http/ngx_http_request.c:1220
+#23 0x0000000000478c32 in ngx_http_wait_request_handler (rev=0x1617da0) at src/http/ngx_http_request.c:523
+#24 0x0000000000455df3 in ngx_epoll_process_events (cycle=0x15eede0, timer=60000, flags=1) at src/event/modules/ngx_epoll_module.c:901
+#25 0x0000000000446aee in ngx_process_events_and_timers (cycle=0x15eede0) at src/event/ngx_event.c:248
+#26 0x0000000000453a75 in ngx_worker_process_cycle (cycle=0x15eede0, data=0x0) at src/os/unix/ngx_process_cycle.c:721
+#27 0x0000000000450b5b in ngx_spawn_process (cycle=0x15eede0, proc=0x4539c7 <ngx_worker_process_cycle>, data=0x0,
+    name=0x4f8dff "worker process", respawn=-3) at src/os/unix/ngx_process.c:199
+#28 0x0000000000452d8b in ngx_start_worker_processes (cycle=0x15eede0, n=1, type=-3) at src/os/unix/ngx_process_cycle.c:344
+#29 0x00000000004525d4 in ngx_master_process_cycle (cycle=0x15eede0) at src/os/unix/ngx_process_cycle.c:130
+#30 0x0000000000411e05 in main (argc=1, argv=0x7ffc6a01d988) at src/core/nginx.c:384

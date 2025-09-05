@@ -15,8 +15,11 @@ typedef struct {
 } ngx_http_upstream_random_range_t;
 
 
+/**
+ * 本模块srv级别配置结构体
+ */
 typedef struct {
-    ngx_uint_t                            two;
+    ngx_uint_t                            two;      //标识是否配置了'two' 参数
 #if (NGX_HTTP_UPSTREAM_ZONE)
     ngx_uint_t                            config;
 #endif
@@ -54,6 +57,8 @@ static char *ngx_http_upstream_random(ngx_conf_t *cf, ngx_command_t *cmd,
 
 static ngx_command_t  ngx_http_upstream_random_commands[] = {
 
+    //https://nginx.org/en/docs/http/ngx_http_upstream_module.html#random
+    //随机负载均衡算法，也考虑权重
     { ngx_string("random"),
       NGX_HTTP_UPS_CONF|NGX_CONF_NOARGS|NGX_CONF_TAKE12,
       ngx_http_upstream_random,
@@ -96,15 +101,25 @@ ngx_module_t  ngx_http_upstream_random_module = {
 };
 
 
+/**
+ * 在执行完指令的解析函数后，紧接着会调用所有HTTP模块的init main conf函数。
+ * 在执行ngx_http_upstream_module的init main conf函数时，会调用所有upstream块的初始化函数。
+ * 对于使用random的upstream块，其初始化函数（peer.init_upstream）就是 ngx_http_upstream_init_random
+ * 
+ * 主要工作：
+ * 
+ */
 static ngx_int_t
 ngx_http_upstream_init_random(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *us)
 {
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, cf->log, 0, "init random");
 
+    /* 使用round robin的upstream块初始化函数，创建和初始化后端集群 */
     if (ngx_http_upstream_init_round_robin(cf, us) != NGX_OK) {
         return NGX_ERROR;
     }
 
+    /* 重新设置per request的负载均衡初始化函数 */
     us->peer.init = ngx_http_upstream_init_random_peer;
 
 #if (NGX_HTTP_UPSTREAM_ZONE)
@@ -117,6 +132,9 @@ ngx_http_upstream_init_random(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *us)
 }
 
 
+/**
+ * 初始化range数组
+ */
 static ngx_int_t
 ngx_http_upstream_update_random(ngx_pool_t *pool,
     ngx_http_upstream_srv_conf_t *us)
@@ -477,6 +495,13 @@ ngx_http_upstream_random_create_conf(ngx_conf_t *cf)
 }
 
 
+/**
+ * random 配置指令解析。 启用随机负载均衡算法
+ * 
+ * random [two [method]]; 
+ * 
+ * 开源版本中，method只能为least_conn
+ */
 static char *
 ngx_http_upstream_random(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -487,13 +512,16 @@ ngx_http_upstream_random(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     uscf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_upstream_module);
 
+    /* 如果不为空，说明upstream块已经配置了负责均衡算法了 */
     if (uscf->peer.init_upstream) {
         ngx_conf_log_error(NGX_LOG_WARN, cf, 0,
                            "load balancing method redefined");
     }
 
+    /* 此upstream块的初始化函数 */
     uscf->peer.init_upstream = ngx_http_upstream_init_random;
 
+    /* 指定此upstream块中server指令支持的属性 */
     uscf->flags = NGX_HTTP_UPSTREAM_CREATE
                   |NGX_HTTP_UPSTREAM_MODIFY
                   |NGX_HTTP_UPSTREAM_WEIGHT
@@ -508,6 +536,7 @@ ngx_http_upstream_random(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     value = cf->args->elts;
 
+    //第二个参数 "two" 参数指示 随机选择两个上游服务器，在两只之间，根据least_conn算法再进行选择
     if (ngx_strcmp(value[1].data, "two") == 0) {
         rcf->two = 1;
 
@@ -521,6 +550,7 @@ ngx_http_upstream_random(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_OK;
     }
 
+    //第三个参数必须为least_conn
     if (ngx_strcmp(value[2].data, "least_conn") != 0) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "invalid parameter \"%V\"", &value[2]);

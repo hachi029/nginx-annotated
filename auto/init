@@ -3,13 +3,17 @@
 # Copyright (C) Nginx, Inc.
 
 
+# 生成最终执行编译的makefile文件路径
 NGX_MAKEFILE=$NGX_OBJS/Makefile
+# 动态生成nginx模块列表的路径，由于nginx的的一些模块是可以选择编译的，而且可以添加自己的模块，所以模块列表是动态生成的
 NGX_MODULES_C=$NGX_OBJS/ngx_modules.c
 
 NGX_AUTO_HEADERS_H=$NGX_OBJS/ngx_auto_headers.h
 NGX_AUTO_CONFIG_H=$NGX_OBJS/ngx_auto_config.h
 
+# 自动测试目录与日志输出文件
 NGX_AUTOTEST=$NGX_OBJS/autotest
+# 如果configure出错，可用来查找出错的原因
 NGX_AUTOCONF_ERR=$NGX_OBJS/autoconf.err
 
 # STUBs
@@ -21,10 +25,12 @@ NGX_PCH=
 NGX_USE_PCH=
 
 
+# 检查echo是否支持-n或\c
 # check the echo's "-n" option and "\c" capability
 
 if echo "test\c" | grep c >/dev/null; then
 
+    # 不支持-c的方式，检查是否支持-n的方式
     if echo -n test | grep n >/dev/null; then
         ngx_n=
         ngx_c=
@@ -40,6 +46,11 @@ else
 fi
 
 
+# 创建最初始的makefile文件
+# default表示目前编译对象
+# clean表示执行clean工作时，需要删除makefile文件以及objs目录
+# 整个过程中只会生成makefile文件以及objs目录，其它所有临时文件都在objs目录之下，所以执行clean后，整个目录还原到初始状态
+# 要再次执行编译，需要重新执行configure命令
 # create Makefile
 
 cat << END > Makefile

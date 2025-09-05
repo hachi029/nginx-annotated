@@ -36,31 +36,37 @@ typedef struct {
 #endif
 
 
-#define NGX_REGEX_CASELESS     0x00000001
+#define NGX_REGEX_CASELESS     0x00000001       //正则忽略大小写
 #define NGX_REGEX_MULTILINE    0x00000002
 
 
+/**
+ * 正则表达式编译时的传参，参考 ngx_http_regex_compile
+ */
 typedef struct {
-    ngx_str_t     pattern;
-    ngx_pool_t   *pool;
-    ngx_uint_t    options;
+    ngx_str_t     pattern;      //原始正则表达式
+    ngx_pool_t   *pool;         /* 编译正则表达式从哪分配内存 */
+    ngx_uint_t    options;      //编译选项，如 NGX_REGEX_CASELESS
 
-    ngx_regex_t  *regex;
-    int           captures;
-    int           named_captures;
-    int           name_size;
-    u_char       *names;
+    ngx_regex_t  *regex;        /* regex->code 编译后的结果，即pcre_compile返回 */
+    int           captures;     /* pcre_fullinfo PCRE_INFO_CAPTURECOUNT 的值。捕获变量的个数 */
+    int           named_captures;   /* 捕获变量设置了别名的个数 */
+    int           name_size;    /* 捕获变量结构长度 */
+    u_char       *names;        /* 捕获变量别名结构数组。别名下标占2个字节剩下的就是变量的名字。index=2*(x[0]<<8 + x[1])*/
     ngx_str_t     err;
 } ngx_regex_compile_t;
 
 
 typedef struct {
-    ngx_regex_t  *regex;
-    u_char       *name;
+    ngx_regex_t  *regex;        //调用ngx_regex_compile后的编译结果. ngx_regex_compile_t->regex
+    u_char       *name;         //原始正则字符串
 } ngx_regex_elt_t;
 
 
 void ngx_regex_init(void);
+/**
+ * 编译一个正则表达式，编译结果为 rc->regex
+ */
 ngx_int_t ngx_regex_compile(ngx_regex_compile_t *rc);
 
 ngx_int_t ngx_regex_exec(ngx_regex_t *re, ngx_str_t *s, int *captures,

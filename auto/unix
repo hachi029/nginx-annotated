@@ -27,12 +27,14 @@ if [ -z "$NGX_GROUP" ]; then
 fi
 
 
-ngx_feature="poll()"
-ngx_feature_name=
-ngx_feature_run=no
-ngx_feature_incs="#include <poll.h>"
-ngx_feature_path=
-ngx_feature_libs=
+# 用来检测当前操作系统是否支持poll函数调用
+# 在调用auto/feature之前，需要先设置几个输入参数变量的值 然后结果会存在$ngx_found变量里面, 并输出宏定义以表示支持此特性
+ngx_feature="poll()"                                    #特性名称
+ngx_feature_name=                                       #特性的宏定义名称，如果特性测试成功，则会定义该宏定义
+ngx_feature_run=no                                      #编译成功后，对二进制文件需要做的动作，可以是yes value bug 其它
+ngx_feature_incs="#include <poll.h>"                    #在代码中要include的头文件
+ngx_feature_path=                                       #编译时要查找头文件目录
+ngx_feature_libs=                                       #编译时需要link的库文件选项
 ngx_feature_test="int  n; struct pollfd  pl;
                   pl.fd = 0;
                   pl.events = 0;
@@ -41,7 +43,9 @@ ngx_feature_test="int  n; struct pollfd  pl;
                   if (n == -1) return 1"
 . auto/feature
 
+#如果找到，并测试成功，其值为yes，否则其值为no
 if [ $ngx_found = no ]; then
+    # 如果没有找到poll，就设置变量的值
     EVENT_POLL=NONE
 fi
 

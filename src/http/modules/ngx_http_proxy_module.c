@@ -23,7 +23,9 @@
 #define  NGX_HTTP_PROXY_COOKIE_SAMESITE_OFF     0x0400
 
 
+//proxy_module main层级配置
 typedef struct {
+    //proxy_cache_path 配置指令值, 元素类型为ngx_http_file_cache_t
     ngx_array_t                    caches;  /* ngx_http_file_cache_t * */
 } ngx_http_proxy_main_conf_t;
 
@@ -34,17 +36,30 @@ typedef ngx_int_t (*ngx_http_proxy_rewrite_pt)(ngx_http_request_t *r,
     ngx_str_t *value, size_t prefix, size_t len,
     ngx_http_proxy_rewrite_t *pr);
 
+/**
+ * 表示一条替换指令， 如指令 proxy_cookie_domain/proxy_redirect/proxy_cookie_path
+ * 
+ *  proxy_cookie_domain domain replacement;
+ *  
+ * domain和replacement都可以包含变量。 domain还可以是正则
+ * 
+ * https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_cookie_domain
+ * 
+ */
 struct ngx_http_proxy_rewrite_s {
+    //如果domain是正则，handler为ngx_http_proxy_rewrite_regex_handler;
+    //如果domain是复杂变量， handler为 ngx_http_proxy_rewrite_domain_handler
     ngx_http_proxy_rewrite_pt      handler;
 
+    //联合体，pattern即domain可以是正则，也可以是复杂变量
     union {
-        ngx_http_complex_value_t   complex;
+        ngx_http_complex_value_t   complex;     //如果是复杂变量
 #if (NGX_PCRE)
-        ngx_http_regex_t          *regex;
+        ngx_http_regex_t          *regex;       //如果是正则表达式，则为正则编译结果
 #endif
     } pattern;
 
-    ngx_http_complex_value_t       replacement;
+    ngx_http_complex_value_t       replacement; //replacement 复杂变量编译结果
 };
 
 
@@ -61,78 +76,121 @@ typedef struct {
 } ngx_http_proxy_cookie_flags_t;
 
 
+/**
+ * proxy_pass 指令中的url
+ */
 typedef struct {
-    ngx_str_t                      key_start;
-    ngx_str_t                      schema;
-    ngx_str_t                      host_header;
-    ngx_str_t                      port;
-    ngx_str_t                      uri;
+    ngx_str_t                      key_start;   //uri中除去schema和host:port之外的部分
+    ngx_str_t                      schema;      //schema, http://或https
+    ngx_str_t                      host_header; //host  ip:port 或host
+    ngx_str_t                      port;        //port
+    ngx_str_t                      uri;         //uri
 } ngx_http_proxy_vars_t;
 
 
+/**
+ * 存放多条proxy_set_header xx $vv 编译出来的指令
+ */
 typedef struct {
-    ngx_array_t                   *flushes;
-    ngx_array_t                   *lengths;
-    ngx_array_t                   *values;
-    ngx_hash_t                     hash;
+    ngx_array_t                   *flushes;     //存放需要清空的变量的索引，元素类型为uint(和values、lengths一样也是编译出来的结果)
+    ngx_array_t                   *lengths;     //计算length的指令
+    ngx_array_t                   *values;      //计算值的指令
+    ngx_hash_t                     hash;        //hash表， key为 proxy_set_header xx $vv中的xx和ngx_http_proxy_headers中的合集， value始终为1
 } ngx_http_proxy_headers_t;
 
 
+/**
+ * 本模块loc级别配置
+ */
 typedef struct {
+    //upstream 如超时等配置
     ngx_http_upstream_conf_t       upstream;
 
+    //存放需要清缓存空的变量的索引,元素类型为uint （和code一样，也是脚本编译出来的结果）
     ngx_array_t                   *body_flushes;
+     //proxy_set_body配置指令中body脚本 计算变量长度的执行单元(code)
     ngx_array_t                   *body_lengths;
+     //proxy_set_body配置指令中body脚本 计算变量值的执行单元(code)
     ngx_array_t                   *body_values;
+    //proxy_set_body配置指令的值
     ngx_str_t                      body_source;
 
     ngx_http_proxy_headers_t       headers;
 #if (NGX_HTTP_CACHE)
     ngx_http_proxy_headers_t       headers_cache;
 #endif
+    //https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_set_header
+    //proxy_set_header 配置指令值， 元素类型是ngx_keyval_t
     ngx_array_t                   *headers_source;
 
+    //proxy_pass配置指令中url脚本 计算变量长度的执行单元(code)
     ngx_array_t                   *proxy_lengths;
+     //proxy_pass配置指令中url脚本 计算变量值的执行单元(code)
     ngx_array_t                   *proxy_values;
 
+    //元素类型为ngx_http_proxy_rewrite_t， proxy_redirect配置指令值
     ngx_array_t                   *redirects;
+    //元素类型为ngx_http_proxy_rewrite_t proxy_cookie_domain 配置指令值
     ngx_array_t                   *cookie_domains;
+    //元素类型为 ngx_http_proxy_rewrite_t proxy_cookie_path 配置指令值
     ngx_array_t                   *cookie_paths;
+    //元素类型为ngx_keyval_t， proxy_cookie_flags 配置指令值
     ngx_array_t                   *cookie_flags;
 
+    //proxy_method 配置指令值
     ngx_http_complex_value_t      *method;
+    //所在的location 块的名称
     ngx_str_t                      location;
+    //proxy_pass 中配置的原始url
     ngx_str_t                      url;
 
 #if (NGX_HTTP_CACHE)
+    //缓存key, proxy_cache_key 配置指令值
     ngx_http_complex_value_t       cache_key;
 #endif
 
     ngx_http_proxy_vars_t          vars;
 
+    //标识是否配置了proxy_redirect指令
     ngx_flag_t                     redirect;
 
+    //proxy_http_version 配置指令值
     ngx_uint_t                     http_version;
 
+    //proxy_headers_hash_max_size 配置指令值
     ngx_uint_t                     headers_hash_max_size;
+    //headers_hash_bucket_size 配置指令值
     ngx_uint_t                     headers_hash_bucket_size;
 
 #if (NGX_HTTP_SSL)
+    //标识上游为https协议： proxy_pass https://
     ngx_uint_t                     ssl;
+    //proxy_ssl_protocols 配置指令值 
     ngx_uint_t                     ssl_protocols;
+    //proxy_ssl_ciphers 配置指令值 
     ngx_str_t                      ssl_ciphers;
+    //proxy_ssl_verify_depth 配置指令值
     ngx_uint_t                     ssl_verify_depth;
+    //proxy_ssl_trusted_certificate 配置指令值
     ngx_str_t                      ssl_trusted_certificate;
+    //proxy_ssl_crl 配置指令值
     ngx_str_t                      ssl_crl;
+    //proxy_ssl_conf_command 配置指令值
     ngx_array_t                   *ssl_conf_commands;
 #endif
 } ngx_http_proxy_loc_conf_t;
 
 
+/**
+ * 本模块的模块上下文
+ */
 typedef struct {
+    //存放解析出来的上游响应行
     ngx_http_status_t              status;
     ngx_http_chunked_t             chunked;
     ngx_http_proxy_vars_t          vars;
+    //body_length, 取客户端请求的content_length_n
+    // 通过指令proxy_set_body 设置的body的长度 或者 原请求body长度。
     off_t                          internal_body_length;
 
     ngx_chain_t                   *free;
@@ -140,6 +198,7 @@ typedef struct {
 
     ngx_buf_t                     *trailers;
 
+    //标识发往上游的请求是否是HEAD方法
     unsigned                       head:1;
     unsigned                       internal_chunked:1;
     unsigned                       header_sent:1;
@@ -300,11 +359,14 @@ static ngx_conf_enum_t  ngx_http_proxy_http_version[] = {
 ngx_module_t  ngx_http_proxy_module;
 
 
+/**
+ * 配置指令
+ */
 static ngx_command_t  ngx_http_proxy_commands[] = {
 
     { ngx_string("proxy_pass"),
       NGX_HTTP_LOC_CONF|NGX_HTTP_LIF_CONF|NGX_HTTP_LMT_CONF|NGX_CONF_TAKE1,
-      ngx_http_proxy_pass,
+      ngx_http_proxy_pass,      //注册content_handler       ngx_http_proxy_handler
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
       NULL },
@@ -351,14 +413,16 @@ static ngx_command_t  ngx_http_proxy_commands[] = {
       offsetof(ngx_http_proxy_loc_conf_t, upstream.store_access),
       NULL },
 
-    { ngx_string("proxy_buffering"),
+    //https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering
+    { ngx_string("proxy_buffering"),    //是否缓存上游的响应 on/off
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
       ngx_conf_set_flag_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_proxy_loc_conf_t, upstream.buffering),
       NULL },
 
-    { ngx_string("proxy_request_buffering"),
+      //https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_request_buffering
+    { ngx_string("proxy_request_buffering"),    //是否缓存客户端的请求 on/off
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
       ngx_conf_set_flag_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
@@ -372,7 +436,7 @@ static ngx_command_t  ngx_http_proxy_commands[] = {
       offsetof(ngx_http_proxy_loc_conf_t, upstream.ignore_client_abort),
       NULL },
 
-    { ngx_string("proxy_bind"),
+    { ngx_string("proxy_bind"),     //设置本地地址和端口
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE12,
       ngx_http_upstream_bind_set_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
@@ -470,6 +534,7 @@ static ngx_command_t  ngx_http_proxy_commands[] = {
       offsetof(ngx_http_proxy_loc_conf_t, upstream.pass_trailers),
       NULL },
 
+    // 用于读取上游响应头的buff, 通常是一页大小。如果不缓存上游响应，也会使用这个buff来同步向下游转发响应
     { ngx_string("proxy_buffer_size"),
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
       ngx_conf_set_size_slot,
@@ -484,6 +549,7 @@ static ngx_command_t  ngx_http_proxy_commands[] = {
       offsetof(ngx_http_proxy_loc_conf_t, upstream.read_timeout),
       NULL },
 
+    //当缓存上游响应时，用于保存上游响应的缓存的大小和数量，默认为1页
     { ngx_string("proxy_buffers"),
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE2,
       ngx_conf_set_bufs_slot,
@@ -805,9 +871,11 @@ static ngx_command_t  ngx_http_proxy_commands[] = {
 
 
 static ngx_http_module_t  ngx_http_proxy_module_ctx = {
+    //注册变量
     ngx_http_proxy_add_variables,          /* preconfiguration */
     NULL,                                  /* postconfiguration */
 
+    //创建ngx_http_proxy_main_conf_t
     ngx_http_proxy_create_main_conf,       /* create main configuration */
     NULL,                                  /* init main configuration */
 
@@ -819,6 +887,12 @@ static ngx_http_module_t  ngx_http_proxy_module_ctx = {
 };
 
 
+/**
+ * ngx_http_proxy_module: allows passing requests to another server
+ * 
+ * https://nginx.org/en/docs/http/ngx_http_proxy_module.html
+ * 
+ */
 ngx_module_t  ngx_http_proxy_module = {
     NGX_MODULE_V1,
     &ngx_http_proxy_module_ctx,            /* module context */
@@ -889,6 +963,9 @@ static ngx_keyval_t  ngx_http_proxy_cache_headers[] = {
 #endif
 
 
+/**
+ * 本模块定义的变量
+ */
 static ngx_http_variable_t  ngx_http_proxy_vars[] = {
 
     { ngx_string("proxy_host"), NULL, ngx_http_proxy_host_variable, 0,
@@ -951,6 +1028,10 @@ static ngx_conf_bitmask_t  ngx_http_proxy_cookie_flags_masks[] = {
 };
 
 
+/**
+ *  ngx_http_proxy_module模块的 content_handler
+ *  实现了反向代理的功能
+ */
 static ngx_int_t
 ngx_http_proxy_handler(ngx_http_request_t *r)
 {
@@ -962,21 +1043,26 @@ ngx_http_proxy_handler(ngx_http_request_t *r)
     ngx_http_proxy_main_conf_t  *pmcf;
 #endif
 
+    //创建r->upstream结构体
     if (ngx_http_upstream_create(r) != NGX_OK) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
+    //创建模块上下文
     ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_proxy_ctx_t));
     if (ctx == NULL) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
+    //设置模块上下文
     ngx_http_set_ctx(r, ctx, ngx_http_proxy_module);
 
+    //获取模块在loc上配置
     plcf = ngx_http_get_module_loc_conf(r, ngx_http_proxy_module);
 
     u = r->upstream;
 
+    //如果为null，则说明proxy_pass的url没有变量
     if (plcf->proxy_lengths == NULL) {
         ctx->vars = plcf->vars;
         u->schema = plcf->vars.schema;
@@ -985,6 +1071,7 @@ ngx_http_proxy_handler(ngx_http_request_t *r)
 #endif
 
     } else {
+        //获取proxy_pass 中url变量值
         if (ngx_http_proxy_eval(r, ctx, plcf) != NGX_OK) {
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         }
@@ -992,6 +1079,7 @@ ngx_http_proxy_handler(ngx_http_request_t *r)
 
     u->output.tag = (ngx_buf_tag_t) &ngx_http_proxy_module;
 
+    //连接配置：超时等
     u->conf = &plcf->upstream;
 
 #if (NGX_HTTP_CACHE)
@@ -1001,14 +1089,16 @@ ngx_http_proxy_handler(ngx_http_request_t *r)
     u->create_key = ngx_http_proxy_create_key;
 #endif
 
+    //设置upstream机制的回调
     u->create_request = ngx_http_proxy_create_request;
     u->reinit_request = ngx_http_proxy_reinit_request;
     u->process_header = ngx_http_proxy_process_status_line;
-    u->abort_request = ngx_http_proxy_abort_request;
-    u->finalize_request = ngx_http_proxy_finalize_request;
+    u->abort_request = ngx_http_proxy_abort_request;        //只是记录了日志
+    u->finalize_request = ngx_http_proxy_finalize_request;  //只是记录了日志
     r->state = 0;
 
     if (plcf->redirects) {
+        //处理响应头Location
         u->rewrite_redirect = ngx_http_proxy_rewrite_redirect;
     }
 
@@ -1016,6 +1106,7 @@ ngx_http_proxy_handler(ngx_http_request_t *r)
         u->rewrite_cookie = ngx_http_proxy_rewrite_cookie;
     }
 
+    //是否开启响应包体缓冲
     u->buffering = plcf->upstream.buffering;
 
     u->pipe = ngx_pcalloc(r->pool, sizeof(ngx_event_pipe_t));
@@ -1032,6 +1123,7 @@ ngx_http_proxy_handler(ngx_http_request_t *r)
 
     u->accel = 1;
 
+    //默认request_buffering为on, 即request_body_no_buffering=0
     if (!plcf->upstream.request_buffering
         && plcf->body_values == NULL && plcf->upstream.pass_request_body
         && (!r->headers_in.chunked
@@ -1040,6 +1132,8 @@ ngx_http_proxy_handler(ngx_http_request_t *r)
         r->request_body_no_buffering = 1;
     }
 
+    //读取完响应体后回调ngx_http_upstream_init
+    //如果配置了proxy_request_buffering off, 则会每读取一段数据，就调用ngx_http_upstream_init，而不会等完全读完请求体才调用
     rc = ngx_http_read_client_request_body(r, ngx_http_upstream_init);
 
     if (rc >= NGX_HTTP_SPECIAL_RESPONSE) {
@@ -1050,6 +1144,11 @@ ngx_http_proxy_handler(ngx_http_request_t *r)
 }
 
 
+/**
+ * 获取proxy_pass 中url变量值
+ * 
+ * url如果不是ip地址，则u->resolved->sockaddr不会赋值，u->resolved->host是域名
+ */
 static ngx_int_t
 ngx_http_proxy_eval(ngx_http_request_t *r, ngx_http_proxy_ctx_t *ctx,
     ngx_http_proxy_loc_conf_t *plcf)
@@ -1061,6 +1160,7 @@ ngx_http_proxy_eval(ngx_http_request_t *r, ngx_http_proxy_ctx_t *ctx,
     ngx_url_t             url;
     ngx_http_upstream_t  *u;
 
+    //获取变量值
     if (ngx_http_script_run(r, &proxy, plcf->proxy_lengths->elts, 0,
                             plcf->proxy_values->elts)
         == NULL)
@@ -1068,6 +1168,7 @@ ngx_http_proxy_eval(ngx_http_request_t *r, ngx_http_proxy_ctx_t *ctx,
         return NGX_ERROR;
     }
 
+    //必须以http://或https://开头
     if (proxy.len > 7
         && ngx_strncasecmp(proxy.data, (u_char *) "http://", 7) == 0)
     {
@@ -1093,17 +1194,20 @@ ngx_http_proxy_eval(ngx_http_request_t *r, ngx_http_proxy_ctx_t *ctx,
 
     u = r->upstream;
 
+    //设置schema
     u->schema.len = add;
     u->schema.data = proxy.data;
 
     ngx_memzero(&url, sizeof(ngx_url_t));
 
+    //设置url， 从schema之后开始
     url.url.len = proxy.len - add;
     url.url.data = proxy.data + add;
     url.default_port = port;
     url.uri_part = 1;
     url.no_resolve = 1;
 
+    //解析url中host
     if (ngx_parse_url(r->pool, &url) != NGX_OK) {
         if (url.err) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -1132,6 +1236,7 @@ ngx_http_proxy_eval(ngx_http_request_t *r, ngx_http_proxy_ctx_t *ctx,
 
     ngx_http_proxy_set_vars(&url, &ctx->vars);
 
+    //设置resolved值
     u->resolved = ngx_pcalloc(r->pool, sizeof(ngx_http_upstream_resolved_t));
     if (u->resolved == NULL) {
         return NGX_ERROR;
@@ -1252,6 +1357,9 @@ ngx_http_proxy_create_key(ngx_http_request_t *r)
 #endif
 
 
+/**
+ * proxy模块实现的upstream机制的create_request
+ */
 static ngx_int_t
 ngx_http_proxy_create_request(ngx_http_request_t *r)
 {
@@ -1282,6 +1390,7 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
     headers = &plcf->headers;
 #endif
 
+    //计算要发往上游的请求方法 
     if (u->method.len) {
         /* HEAD was changed to GET to cache response */
         method = u->method;
@@ -1303,6 +1412,8 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
         ctx->head = 1;
     }
 
+    //len计算发往上游的数据长度  GET / HTTP/1.1
+    //  ngx_http_proxy_version 是定义的字符串常量，以0结尾，所以减去1。 CRLF同理。
     len = method.len + 1 + sizeof(ngx_http_proxy_version) - 1
           + sizeof(CRLF) - 1;
 
@@ -1310,14 +1421,19 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
     loc_len = 0;
     unparsed_uri = 0;
 
+    //计算uri长度
     if (plcf->proxy_lengths && ctx->vars.uri.len) {
+        //proxy_pass 指令的URL有变量   and  URL指定了uri
         uri_len = ctx->vars.uri.len;
 
     } else if (ctx->vars.uri.len == 0 && r->valid_unparsed_uri) {
+         //  proxy_pass 没有指定uri  and  请求的uri没有编码 
         unparsed_uri = 1;
         uri_len = r->unparsed_uri.len;
 
     } else {
+        // location 有效and proxy_pass 指定了uri 则 
+        // 取location name的长度（proxy_pass 指令所属location 的name）
         loc_len = (r->valid_location && ctx->vars.uri.len) ?
                       plcf->location.len : 0;
 
@@ -1326,6 +1442,8 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
                                         r->uri.len - loc_len, NGX_ESCAPE_URI);
         }
 
+        // proxy_pass 指定uri的长度 + 原请求uri减去location name的长度 + encode添加额外字符的长度 
+        // + ? + args 参数长度。
         uri_len = ctx->vars.uri.len + r->uri.len - loc_len + escape
                   + sizeof("?") - 1 + r->args.len;
     }
@@ -1336,14 +1454,18 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
         return NGX_ERROR;
     }
 
+    //len加上uri的长度
     len += uri_len;
 
     ngx_memzero(&le, sizeof(ngx_http_script_engine_t));
 
+    //清空变量值缓存
     ngx_http_script_flush_no_cacheable_variables(r, plcf->body_flushes);
     ngx_http_script_flush_no_cacheable_variables(r, headers->flushes);
 
+    //计算body_len
     if (plcf->body_lengths) {
+        //配置了proxy_set_body指令
         le.ip = plcf->body_lengths->elts;
         le.request = r;
         le.flushed = 1;
@@ -1365,6 +1487,7 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
         ctx->internal_body_length = r->headers_in.content_length_n;
     }
 
+    //计算header长度
     le.ip = headers->lengths->elts;
     le.request = r;
     le.flushed = 1;
@@ -1372,25 +1495,32 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
     while (*(uintptr_t *) le.ip) {
 
         lcode = *(ngx_http_script_len_code_pt *) le.ip;
+        //key的长度
         key_len = lcode(&le);
 
+        //value的长度,  每组请求头之间通过NULL指针分割
         for (val_len = 0; *(uintptr_t *) le.ip; val_len += lcode(&le)) {
             lcode = *(ngx_http_script_len_code_pt *) le.ip;
         }
+        // 跳过分割的空指针，到下一组请求头
         le.ip += sizeof(uintptr_t);
 
+        //如果值为NULL, 则跳过
         if (val_len == 0) {
             continue;
         }
 
+        // 添加一组请求头的长度 key: value
         len += key_len + sizeof(": ") - 1 + val_len + sizeof(CRLF) - 1;
     }
 
 
+    //如果向上游转发客户端请求体
     if (plcf->upstream.pass_request_headers) {
         part = &r->headers_in.headers.part;
         header = part->elts;
 
+        //遍历客户端请求的所有header
         for (i = 0; /* void */; i++) {
 
             if (i >= part->nelts) {
@@ -1403,23 +1533,27 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
                 i = 0;
             }
 
+            //如果在proxy_set_header指令中，说明被重定义了，已经计算过其长度了，跳过
             if (ngx_hash_find(&headers->hash, header[i].hash,
                               header[i].lowcase_key, header[i].key.len))
             {
                 continue;
             }
 
+            //将len加上请求头的长度
             len += header[i].key.len + sizeof(": ") - 1
                 + header[i].value.len + sizeof(CRLF) - 1;
         }
     }
 
 
+    //创建用于存放发往上游的缓冲区
     b = ngx_create_temp_buf(r->pool, len);
     if (b == NULL) {
         return NGX_ERROR;
     }
 
+    //创建一个缓冲区链表
     cl = ngx_alloc_chain_link(r->pool);
     if (cl == NULL) {
         return NGX_ERROR;
@@ -1430,12 +1564,16 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
 
     /* the request line */
 
+    //1. method
     b->last = ngx_copy(b->last, method.data, method.len);
     *b->last++ = ' ';
 
+    //2.uri
     u->uri.data = b->last;
 
+     // 以下是拼接请求的uri
     if (plcf->proxy_lengths && ctx->vars.uri.len) {
+        // proxy_pass  的URI 有变量。转发到上游的uri 只解析proxy_pass 后的。
         b->last = ngx_copy(b->last, ctx->vars.uri.data, ctx->vars.uri.len);
 
     } else if (unparsed_uri) {
@@ -1452,10 +1590,12 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
             b->last += r->uri.len - loc_len + escape;
 
         } else {
+             // 拼接原请求uri移除location name的前缀
             b->last = ngx_copy(b->last, r->uri.data + loc_len,
                                r->uri.len - loc_len);
         }
 
+        // 拼接参数
         if (r->args.len > 0) {
             *b->last++ = '?';
             b->last = ngx_copy(b->last, r->args.data, r->args.len);
@@ -1464,15 +1604,18 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
 
     u->uri.len = b->last - u->uri.data;
 
+    //3. http_version, 默认是HTTP/1.0
     if (plcf->http_version == NGX_HTTP_VERSION_11) {
         b->last = ngx_cpymem(b->last, ngx_http_proxy_version_11,
                              sizeof(ngx_http_proxy_version_11) - 1);
 
     } else {
+        //如果没有通过proxy_http_version指定http版本，则默认会选择http1.0
         b->last = ngx_cpymem(b->last, ngx_http_proxy_version,
                              sizeof(ngx_http_proxy_version) - 1);
     }
 
+    //4.header
     ngx_memzero(&e, sizeof(ngx_http_script_engine_t));
 
     e.ip = headers->values->elts;
@@ -1480,19 +1623,24 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
     e.request = r;
     e.flushed = 1;
 
+    // 重置计算header头的长度
     le.ip = headers->lengths->elts;
 
     while (*(uintptr_t *) le.ip) {
 
         lcode = *(ngx_http_script_len_code_pt *) le.ip;
+         // 跳过key
         (void) lcode(&le);
 
+        // 计算val的长度
         for (val_len = 0; *(uintptr_t *) le.ip; val_len += lcode(&le)) {
             lcode = *(ngx_http_script_len_code_pt *) le.ip;
         }
         le.ip += sizeof(uintptr_t);
 
+        //value为NULL
         if (val_len == 0) {
+            // 对应的key没有值，则跳过。不拼接该header
             e.skip = 1;
 
             while (*(uintptr_t *) e.ip) {
@@ -1523,10 +1671,12 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
     b->last = e.pos;
 
 
+    //如果需要向上游转发请求头，处理其他请求头
     if (plcf->upstream.pass_request_headers) {
         part = &r->headers_in.headers.part;
         header = part->elts;
 
+        //遍历客户端请求所有header
         for (i = 0; /* void */; i++) {
 
             if (i >= part->nelts) {
@@ -1539,6 +1689,7 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
                 i = 0;
             }
 
+            //proxy_set_header 指令已经处理过了
             if (ngx_hash_find(&headers->hash, header[i].hash,
                               header[i].lowcase_key, header[i].key.len))
             {
@@ -1564,7 +1715,8 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
     /* add "\r\n" at the header end */
     *b->last++ = CR; *b->last++ = LF;
 
-    if (plcf->body_values) {
+    //body 
+    if (plcf->body_values) {    //不为空说明设置了proxy_set_body指令
         e.ip = plcf->body_values->elts;
         e.pos = b->last;
         e.skip = 0;
@@ -1581,19 +1733,25 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
                    "http proxy header:%N\"%*s\"",
                    (size_t) (b->last - b->pos), b->pos);
 
+    //默认值为0， 缓存请求体               
     if (r->request_body_no_buffering) {
 
+        // 原请求的body不在内存中
         u->request_bufs = cl;
 
         if (ctx->internal_chunked) {
+            // u->output 是向上游发起请求
+            // 原请求是chunked类型的
             u->output.output_filter = ngx_http_proxy_body_output_filter;
             u->output.filter_ctx = r;
         }
 
     } else if (plcf->body_values == NULL && plcf->upstream.pass_request_body) {
+        //body_values为NULL说明没有设置proxy_set_body指令；pass_request_body 说明需要向上游转发请求体
+
 
         body = u->request_bufs;
-        u->request_bufs = cl;
+        u->request_bufs = cl;       //重置u->request_bufs， 加入请求行和请求头
 
         while (body) {
             b = ngx_alloc_buf(r->pool);
@@ -1601,6 +1759,7 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
                 return NGX_ERROR;
             }
 
+            //复制请求buf, 只是复制了ngx_buf_t本身，没有复制数据
             ngx_memcpy(b, body->buf, sizeof(ngx_buf_t));
 
             cl->next = ngx_alloc_chain_link(r->pool);
@@ -1625,6 +1784,9 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
 }
 
 
+/**
+ * upstream机制的reinit_request
+ */
 static ngx_int_t
 ngx_http_proxy_reinit_request(ngx_http_request_t *r)
 {
@@ -1636,6 +1798,7 @@ ngx_http_proxy_reinit_request(ngx_http_request_t *r)
         return NGX_OK;
     }
 
+    //重置status
     ctx->status.code = 0;
     ctx->status.count = 0;
     ctx->status.start = NULL;
@@ -1651,6 +1814,12 @@ ngx_http_proxy_reinit_request(ngx_http_request_t *r)
 }
 
 
+/**
+ * ngx_http_proxy_create_request 中设置：
+ * 
+ * u->output.output_filter = ngx_http_proxy_body_output_filter;
+ * 
+ */
 static ngx_int_t
 ngx_http_proxy_body_output_filter(void *data, ngx_chain_t *in)
 {
@@ -1818,6 +1987,9 @@ out:
 }
 
 
+/**
+ * upstream机制的process_header
+ */
 static ngx_int_t
 ngx_http_proxy_process_status_line(ngx_http_request_t *r)
 {
@@ -1834,12 +2006,15 @@ ngx_http_proxy_process_status_line(ngx_http_request_t *r)
 
     u = r->upstream;
 
+    //解析状态行
     rc = ngx_http_parse_status_line(r, &u->buffer, &ctx->status);
 
+    //未解析完
     if (rc == NGX_AGAIN) {
         return rc;
     }
 
+    //格式错误
     if (rc == NGX_ERROR) {
 
 #if (NGX_HTTP_CACHE)
@@ -1867,7 +2042,10 @@ ngx_http_proxy_process_status_line(ngx_http_request_t *r)
         return NGX_OK;
     }
 
+    //解析成功
+
     if (u->state && u->state->status == 0) {
+        //设置响应码
         u->state->status = ctx->status.code;
     }
 
@@ -1881,6 +2059,7 @@ ngx_http_proxy_process_status_line(ngx_http_request_t *r)
         return NGX_ERROR;
     }
 
+    //复制状态行
     ngx_memcpy(u->headers_in.status_line.data, ctx->status.start, len);
 
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -1891,12 +2070,16 @@ ngx_http_proxy_process_status_line(ngx_http_request_t *r)
         u->headers_in.connection_close = 1;
     }
 
+    //处理响应头
     u->process_header = ngx_http_proxy_process_header;
 
     return ngx_http_proxy_process_header(r);
 }
 
 
+/**
+ * 解析上游响应的响应头
+ */
 static ngx_int_t
 ngx_http_proxy_process_header(ngx_http_request_t *r)
 {
@@ -1911,12 +2094,14 @@ ngx_http_proxy_process_header(ngx_http_request_t *r)
 
     for ( ;; ) {
 
+        //逐行解析
         rc = ngx_http_parse_header_line(r, &r->upstream->buffer, 1);
 
-        if (rc == NGX_OK) {
+        if (rc == NGX_OK) {     //表示解析除了一个完整的响应头
 
             /* a header line has been parsed successfully */
 
+            //加入到r->upstream->headers_in.headers
             h = ngx_list_push(&r->upstream->headers_in.headers);
             if (h == NULL) {
                 return NGX_ERROR;
@@ -1937,22 +2122,28 @@ ngx_http_proxy_process_header(ngx_http_request_t *r)
             h->value.data = h->key.data + h->key.len + 1;
             h->lowcase_key = h->key.data + h->key.len + 1 + h->value.len + 1;
 
+            //内存拷贝 key
             ngx_memcpy(h->key.data, r->header_name_start, h->key.len);
             h->key.data[h->key.len] = '\0';
+            //内存拷贝 value
             ngx_memcpy(h->value.data, r->header_start, h->value.len);
             h->value.data[h->value.len] = '\0';
 
             if (h->key.len == r->lowcase_index) {
+                //小写的key也是内存拷贝
                 ngx_memcpy(h->lowcase_key, r->lowcase_header, h->key.len);
 
             } else {
                 ngx_strlow(h->lowcase_key, h->key.data, h->key.len);
             }
 
+            //根据小写的key查找
             hh = ngx_hash_find(&umcf->headers_in_hash, h->hash,
                                h->lowcase_key, h->key.len);
 
             if (hh) {
+                //处理header, 参考ngx_http_upstream_headers_in数组
+                //将此header设置到rfc指定的常用的具体字段中
                 rc = hh->handler(r, h, hh->offset);
 
                 if (rc != NGX_OK) {
@@ -1967,6 +2158,7 @@ ngx_http_proxy_process_header(ngx_http_request_t *r)
             continue;
         }
 
+        //header解析结束
         if (rc == NGX_HTTP_PARSE_HEADER_DONE) {
 
             /* a whole header has been parsed successfully */
@@ -1979,6 +2171,7 @@ ngx_http_proxy_process_header(ngx_http_request_t *r)
              * then add the special empty headers
              */
 
+            //如果上游没有返回Server响应头， 则添加一个
             if (r->upstream->headers_in.server == NULL) {
                 h = ngx_list_push(&r->upstream->headers_in.headers);
                 if (h == NULL) {
@@ -1989,11 +2182,12 @@ ngx_http_proxy_process_header(ngx_http_request_t *r)
                                     ngx_hash('s', 'e'), 'r'), 'v'), 'e'), 'r');
 
                 ngx_str_set(&h->key, "Server");
-                ngx_str_null(&h->value);
+                ngx_str_null(&h->value);            //此处value设置的是null
                 h->lowcase_key = (u_char *) "server";
                 h->next = NULL;
             }
 
+            //如果上游没有返回Date响应头， 则添加一个
             if (r->upstream->headers_in.date == NULL) {
                 h = ngx_list_push(&r->upstream->headers_in.headers);
                 if (h == NULL) {
@@ -2003,7 +2197,7 @@ ngx_http_proxy_process_header(ngx_http_request_t *r)
                 h->hash = ngx_hash(ngx_hash(ngx_hash('d', 'a'), 't'), 'e');
 
                 ngx_str_set(&h->key, "Date");
-                ngx_str_null(&h->value);
+                ngx_str_null(&h->value);            //此处value设置的是null
                 h->lowcase_key = (u_char *) "date";
                 h->next = NULL;
             }
@@ -2012,6 +2206,7 @@ ngx_http_proxy_process_header(ngx_http_request_t *r)
 
             u = r->upstream;
 
+            //如果是chunked响应，将content_length_n置为-1
             if (u->headers_in.chunked) {
                 u->headers_in.content_length_n = -1;
             }
@@ -2023,6 +2218,7 @@ ngx_http_proxy_process_header(ngx_http_request_t *r)
 
             ctx = ngx_http_get_module_ctx(r, ngx_http_proxy_module);
 
+            //设置keepalive属性
             if (u->headers_in.status_n == NGX_HTTP_NO_CONTENT
                 || u->headers_in.status_n == NGX_HTTP_NOT_MODIFIED
                 || ctx->head
@@ -2032,6 +2228,7 @@ ngx_http_proxy_process_header(ngx_http_request_t *r)
                 u->keepalive = !u->headers_in.connection_close;
             }
 
+            //如果响应状态码为101，且客户端请求包含Upgrade请求头
             if (u->headers_in.status_n == NGX_HTTP_SWITCHING_PROTOCOLS) {
                 u->keepalive = 0;
 
@@ -2059,6 +2256,9 @@ ngx_http_proxy_process_header(ngx_http_request_t *r)
 }
 
 
+/**
+ * 处理上游响应的input_filter初始化
+ */
 static ngx_int_t
 ngx_http_proxy_input_filter_init(void *data)
 {
@@ -2094,6 +2294,7 @@ ngx_http_proxy_input_filter_init(void *data)
     } else if (u->headers_in.chunked) {
         /* chunked */
 
+        //对于chunked响应
         u->pipe->input_filter = ngx_http_proxy_chunked_filter;
         u->pipe->length = 3; /* "0" LF LF */
 
@@ -2198,6 +2399,10 @@ ngx_http_proxy_copy_filter(ngx_event_pipe_t *p, ngx_buf_t *buf)
 }
 
 
+/**
+ * 在ngx_http_proxy_input_filter_init函数中可以看到，对于chunked的响应，pipe->input_filter 指向ngx_http_proxy_chunked_filter 函数
+ * 
+ */
 static ngx_int_t
 ngx_http_proxy_chunked_filter(ngx_event_pipe_t *p, ngx_buf_t *buf)
 {
@@ -2394,6 +2599,13 @@ free_buf:
 }
 
 
+/**
+ * ngx_http_upstream_process_header -> ngx_http_upstream_send_response -> ngx_http_upstream_process_upstream -> ngx_event_pipe(p, 0) -> ngx_event_pipe_read_upstream -> p->input_filter.
+ * 处理上游响应的input_filter
+ * 
+ * u->input_filter = ngx_http_proxy_non_buffered_copy_filter;
+ * 
+ */
 static ngx_int_t
 ngx_http_proxy_non_buffered_copy_filter(void *data, ssize_t bytes)
 {
@@ -2711,6 +2923,9 @@ ngx_http_proxy_process_trailer(ngx_http_request_t *r, ngx_buf_t *buf)
 }
 
 
+/**
+ * upstream机制的abort_request回调
+ */
 static void
 ngx_http_proxy_abort_request(ngx_http_request_t *r)
 {
@@ -2721,6 +2936,9 @@ ngx_http_proxy_abort_request(ngx_http_request_t *r)
 }
 
 
+/**
+ * upstream机制的finalize_request回调
+ */
 static void
 ngx_http_proxy_finalize_request(ngx_http_request_t *r, ngx_int_t rc)
 {
@@ -2731,6 +2949,9 @@ ngx_http_proxy_finalize_request(ngx_http_request_t *r, ngx_int_t rc)
 }
 
 
+/**
+ * $proxy_host get_handler
+ */
 static ngx_int_t
 ngx_http_proxy_host_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data)
@@ -2754,6 +2975,9 @@ ngx_http_proxy_host_variable(ngx_http_request_t *r,
 }
 
 
+/**
+ * $proxy_port get_handler
+ */
 static ngx_int_t
 ngx_http_proxy_port_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data)
@@ -2777,6 +3001,9 @@ ngx_http_proxy_port_variable(ngx_http_request_t *r,
 }
 
 
+/**
+ * $proxy_add_x_forwarded_for get_handler
+ */
 static ngx_int_t
 ngx_http_proxy_add_x_forwarded_for_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data)
@@ -2824,6 +3051,9 @@ ngx_http_proxy_add_x_forwarded_for_variable(ngx_http_request_t *r,
 }
 
 
+/**
+ * $proxy_internal_body_length get_handler
+ */
 static ngx_int_t
 ngx_http_proxy_internal_body_length_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data)
@@ -2853,6 +3083,9 @@ ngx_http_proxy_internal_body_length_variable(ngx_http_request_t *r,
 }
 
 
+/**
+ * $proxy_internal_chunked get_handler
+ */
 static ngx_int_t
 ngx_http_proxy_internal_chunked_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data)
@@ -2877,6 +3110,21 @@ ngx_http_proxy_internal_chunked_variable(ngx_http_request_t *r,
 }
 
 
+/**
+ * 
+ * 
+ * 当将上游响应头u->headers_in拷贝到客户端响应头r->headers_out时，如果上游返回了响应头Location或Refresh
+ * 
+ * 将调用此方法对Location和Refresh响应头进行重写。 处理proxy_redirect指令。
+ * 
+ * 由ngx_http_upstream_rewrite_refresh/ngx_http_upstream_rewrite_location 调用而来
+ * 
+ * https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_redirect
+ * 
+ * 
+ * prefix: 为应该跳过的字节数
+ * 
+ */
 static ngx_int_t
 ngx_http_proxy_rewrite_redirect(ngx_http_request_t *r, ngx_table_elt_t *h,
     size_t prefix)
@@ -2891,12 +3139,14 @@ ngx_http_proxy_rewrite_redirect(ngx_http_request_t *r, ngx_table_elt_t *h,
 
     pr = plcf->redirects->elts;
 
+    //为NULL说明没配置proxy_redirect指令
     if (pr == NULL) {
         return NGX_DECLINED;
     }
 
     len = h->value.len - prefix;
 
+    //变量所有的proxy_redirect规则进行处理
     for (i = 0; i < plcf->redirects->nelts; i++) {
         rc = pr[i].handler(r, &h->value, prefix, len, &pr[i]);
 
@@ -2909,6 +3159,16 @@ ngx_http_proxy_rewrite_redirect(ngx_http_request_t *r, ngx_table_elt_t *h,
 }
 
 
+/**
+ * 对上游的单个响应头Set-Cookie中的domain和path属性进行重写，或增、删flags 如httponly、secure 等
+ * 
+ * 上游可能响应多个Set-Cookie头，每个Set-Cookie头都会调用一次本方法
+ * 
+ * 处理proxy_cookie_domain/proxy_cookie_path/proxy_cookie_flags 指令
+ * 
+ * 从ngx_http_upstream_rewrite_set_cookie 调过来
+ * 当将Set-Cookie响应头从u->headers_in往r->headers_out复制时调用
+ */
 static ngx_int_t
 ngx_http_proxy_rewrite_cookie(ngx_http_request_t *r, ngx_table_elt_t *h)
 {
@@ -2925,12 +3185,14 @@ ngx_http_proxy_rewrite_cookie(ngx_http_request_t *r, ngx_table_elt_t *h)
         return NGX_ERROR;
     }
 
+    //将Set-Cookie的值解析为kv对，放入attrs动态数组中
     if (ngx_http_proxy_parse_cookie(&h->value, &attrs) != NGX_OK) {
         return NGX_ERROR;
     }
 
     attr = attrs.elts;
 
+    //第一个kv对为Cookie的name和value. 忽略value为空的
     if (attr[0].value.data == NULL) {
         return NGX_DECLINED;
     }
@@ -2944,10 +3206,13 @@ ngx_http_proxy_rewrite_cookie(ngx_http_request_t *r, ngx_table_elt_t *h)
         key = &attr[i].key;
         value = &attr[i].value;
 
+        //https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_cookie_domain
+        //如果配置了proxy_cookie_domain指令，需要对Set-Cookie中的domain字段进行重写
         if (plcf->cookie_domains && key->len == 6
             && ngx_strncasecmp(key->data, (u_char *) "domain", 6) == 0
             && value->data)
         {
+            //执行重写
             rc = ngx_http_proxy_rewrite_cookie_value(r, value,
                                                      plcf->cookie_domains);
             if (rc == NGX_ERROR) {
@@ -2959,10 +3224,13 @@ ngx_http_proxy_rewrite_cookie(ngx_http_request_t *r, ngx_table_elt_t *h)
             }
         }
 
+        //https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_cookie_path
+        //如果配置了proxy_cookie_path指令，需要对Set-Cookie中的path字段进行重写
         if (plcf->cookie_paths && key->len == 4
             && ngx_strncasecmp(key->data, (u_char *) "path", 4) == 0
             && value->data)
         {
+            //执行重写
             rc = ngx_http_proxy_rewrite_cookie_value(r, value,
                                                      plcf->cookie_paths);
             if (rc == NGX_ERROR) {
@@ -2975,6 +3243,8 @@ ngx_http_proxy_rewrite_cookie(ngx_http_request_t *r, ngx_table_elt_t *h)
         }
     }
 
+    //https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_cookie_flags
+    //处理指令proxy_cookie_flags, 增、删 Set-Cookie中的flags
     if (plcf->cookie_flags) {
         rc = ngx_http_proxy_rewrite_cookie_flags(r, &attrs,
                                                  plcf->cookie_flags);
@@ -2993,25 +3263,31 @@ ngx_http_proxy_rewrite_cookie(ngx_http_request_t *r, ngx_table_elt_t *h)
         return rv;
     }
 
+    //len为重新计算的Set-Cookie值的长度
     len = 0;
 
+    //遍历Set-Cookie值的所有属性对
     for (i = 0; i < attrs.nelts; i++) {
 
+        //忽略key为NULL的
         if (attr[i].key.data == NULL) {
             continue;
         }
 
         if (i > 0) {
-            len += 2;
+            len += 2;       //属性分隔符 '; '
         }
 
+        //加属性的key长度
         len += attr[i].key.len;
 
+        //'='+加属性的value长度
         if (attr[i].value.data) {
             len += 1 + attr[i].value.len;
         }
     }
 
+    //分配重新计算的Set-Cookie值空间
     p = ngx_pnalloc(r->pool, len + 1);
     if (p == NULL) {
         return NGX_ERROR;
@@ -3020,6 +3296,7 @@ ngx_http_proxy_rewrite_cookie(ngx_http_request_t *r, ngx_table_elt_t *h)
     h->value.data = p;
     h->value.len = len;
 
+    //遍历所有的属性对，构建新的Set-Cookie值
     for (i = 0; i < attrs.nelts; i++) {
 
         if (attr[i].key.data == NULL) {
@@ -3045,6 +3322,18 @@ ngx_http_proxy_rewrite_cookie(ngx_http_request_t *r, ngx_table_elt_t *h)
 }
 
 
+/**
+ * 解析Set-Cookie响应头. attrs 元素类型为 ngx_keyval_t 
+ * 
+ * 这个函数的作用是将一个Set-Cookie的响应头字符串值解析为kv格式的动态数组attrs
+ * 
+ * https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Reference/Headers/Set-Cookie
+ * 
+ * 格式: Set-Cookie: <cookie-name>=<cookie-value>; Domain=<domain-value>; Secure; HttpOnly
+ * 
+ * 
+ * 
+ */
 static ngx_int_t
 ngx_http_proxy_parse_cookie(ngx_str_t *value, ngx_array_t *attrs)
 {
@@ -3063,13 +3352,16 @@ ngx_http_proxy_parse_cookie(ngx_str_t *value, ngx_array_t *attrs)
             last = end;
         }
 
+        //跳过前置空格
         while (start < last && *start == ' ') { start++; }
 
+        //找到cookie的key即name
         for (p = start; p < last && *p != '='; p++) { /* void */ }
 
         name.data = start;
         name.len = p - start;
 
+        //去掉name中包含的空格后缀
         while (name.len && name.data[name.len - 1] == ' ') {
             name.len--;
         }
@@ -3078,11 +3370,13 @@ ngx_http_proxy_parse_cookie(ngx_str_t *value, ngx_array_t *attrs)
 
             p++;
 
+            //去掉value的空格前缀
             while (p < last && *p == ' ') { p++; }
 
             val.data = p;
             val.len = last - val.data;
 
+            //去掉value的空格后缀
             while (val.len && val.data[val.len - 1] == ' ') {
                 val.len--;
             }
@@ -3091,6 +3385,7 @@ ngx_http_proxy_parse_cookie(ngx_str_t *value, ngx_array_t *attrs)
             ngx_str_null(&val);
         }
 
+        //加入一个k-v对
         attr = ngx_array_push(attrs);
         if (attr == NULL) {
             return NGX_ERROR;
@@ -3110,6 +3405,11 @@ ngx_http_proxy_parse_cookie(ngx_str_t *value, ngx_array_t *attrs)
 }
 
 
+/**
+ * 处理proxy_cookie_domain指令，对Set-Cookie中的domain字段进行重写
+ * value: 为重写前的值
+ * rewrites： ngx_http_proxy_rewrite_t类型的动态数组，表示重写规则。handler 根据是正则表达式，还是是复杂变量 而不同
+ */
 static ngx_int_t
 ngx_http_proxy_rewrite_cookie_value(ngx_http_request_t *r, ngx_str_t *value,
     ngx_array_t *rewrites)
@@ -3118,6 +3418,7 @@ ngx_http_proxy_rewrite_cookie_value(ngx_http_request_t *r, ngx_str_t *value,
     ngx_uint_t                 i;
     ngx_http_proxy_rewrite_t  *pr;
 
+    //遍历所有的重写规则
     pr = rewrites->elts;
 
     for (i = 0; i < rewrites->nelts; i++) {
@@ -3132,6 +3433,10 @@ ngx_http_proxy_rewrite_cookie_value(ngx_http_request_t *r, ngx_str_t *value,
 }
 
 
+/**
+ *https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_cookie_flags
+ *  处理指令proxy_cookie_flags, 增、删 Set-Cookie中的flags
+ */
 static ngx_int_t
 ngx_http_proxy_rewrite_cookie_flags(ngx_http_request_t *r, ngx_array_t *attrs,
     ngx_array_t *flags)
@@ -3360,32 +3665,55 @@ ngx_http_proxy_edit_cookie_flags(ngx_http_request_t *r, ngx_array_t *attrs,
 }
 
 
+/**
+ * 执行proxy_redirect指令，对Refresh和Location响应头进行重写
+ * 
+ * 当proxy_redirect指令中的redirect为复杂变量时，此函数为ngx_http_proxy_rewrite_redirect方法里的handler
+ * 
+ * value: 为Refresh或Location响应头的value
+ * prefix: 替换value应该跳过的字节数
+ * len: value的length
+ * 
+ */
 static ngx_int_t
 ngx_http_proxy_rewrite_complex_handler(ngx_http_request_t *r, ngx_str_t *value,
     size_t prefix, size_t len, ngx_http_proxy_rewrite_t *pr)
 {
     ngx_str_t  pattern, replacement;
 
+    //计算redirect值
     if (ngx_http_complex_value(r, &pr->pattern.complex, &pattern) != NGX_OK) {
         return NGX_ERROR;
     }
 
+    //比较redirect值与value是否相等(是否匹配)
     if (pattern.len > len
         || ngx_rstrncmp(value->data + prefix, pattern.data, pattern.len) != 0)
     {
+        //不匹配
         return NGX_DECLINED;
     }
+    /* redirect 与响应头的value匹配，需要执行重写逻辑 */
 
+    //计算replacement值
     if (ngx_http_complex_value(r, &pr->replacement, &replacement) != NGX_OK) {
         return NGX_ERROR;
     }
 
+    //执行替换
     return ngx_http_proxy_rewrite(r, value, prefix, pattern.len, &replacement);
 }
 
 
 #if (NGX_PCRE)
 
+/**
+ * 替换指令场景中 关键字为正则时的handler
+ * 参考ngx_http_proxy_rewrite_regex方法
+ * value: 为需要执行替换的值
+ * prefix: 为值中需要跳过的字符
+ * 
+ */
 static ngx_int_t
 ngx_http_proxy_rewrite_regex_handler(ngx_http_request_t *r, ngx_str_t *value,
     size_t prefix, size_t len, ngx_http_proxy_rewrite_t *pr)
@@ -3395,20 +3723,30 @@ ngx_http_proxy_rewrite_regex_handler(ngx_http_request_t *r, ngx_str_t *value,
     pattern.len = len;
     pattern.data = value->data + prefix;
 
+    //检查是否匹配正则
     if (ngx_http_regex_exec(r, pr->pattern.regex, &pattern) != NGX_OK) {
         return NGX_DECLINED;
     }
 
+    //计算replacement值
     if (ngx_http_complex_value(r, &pr->replacement, &replacement) != NGX_OK) {
         return NGX_ERROR;
     }
 
+    //执行替换
     return ngx_http_proxy_rewrite(r, value, prefix, len, &replacement);
 }
 
 #endif
 
 
+/**
+ * 替换指令场景中 关键字为复杂变量时的handler, 对Set-Cookie中的domain属性进行重写
+ * 参考ngx_http_proxy_cookie_domain方法
+ * 
+ * proxy_cookie_domain domain replacement
+ * 
+ */
 static ngx_int_t
 ngx_http_proxy_rewrite_domain_handler(ngx_http_request_t *r, ngx_str_t *value,
     size_t prefix, size_t len, ngx_http_proxy_rewrite_t *pr)
@@ -3416,6 +3754,7 @@ ngx_http_proxy_rewrite_domain_handler(ngx_http_request_t *r, ngx_str_t *value,
     u_char     *p;
     ngx_str_t   pattern, replacement;
 
+    //计算复杂变量domain
     if (ngx_http_complex_value(r, &pr->pattern.complex, &pattern) != NGX_OK) {
         return NGX_ERROR;
     }
@@ -3428,18 +3767,32 @@ ngx_http_proxy_rewrite_domain_handler(ngx_http_request_t *r, ngx_str_t *value,
         len--;
     }
 
+    //比较复杂变量domain值与value是否匹配
     if (pattern.len != len || ngx_rstrncasecmp(pattern.data, p, len) != 0) {
         return NGX_DECLINED;
     }
 
+    //匹配，需要执行替换
     if (ngx_http_complex_value(r, &pr->replacement, &replacement) != NGX_OK) {
         return NGX_ERROR;
     }
 
+    //值替换
     return ngx_http_proxy_rewrite(r, value, prefix, len, &replacement);
 }
 
 
+/**
+ * 执行值的替换重写。 如将a__b 替换成a-b
+ * 
+ * value: 要被替换的值指针
+ * prefix: 跳过的字符数
+ * len: 被替换掉的值的长度
+ * replacement: 要替换成的值
+ * 
+ *   如a__b 替换成a-b, 则len为2， prefix为a; len为2; replacement为-
+ * 
+ */
 static ngx_int_t
 ngx_http_proxy_rewrite(ngx_http_request_t *r, ngx_str_t *value, size_t prefix,
     size_t len, ngx_str_t *replacement)
@@ -3447,6 +3800,7 @@ ngx_http_proxy_rewrite(ngx_http_request_t *r, ngx_str_t *value, size_t prefix,
     u_char  *p, *data;
     size_t   new_len;
 
+    //如果源值和要替换成的值相等，直接复制
     if (len == value->len) {
         *value = *replacement;
         return NGX_OK;
@@ -3454,34 +3808,44 @@ ngx_http_proxy_rewrite(ngx_http_request_t *r, ngx_str_t *value, size_t prefix,
 
     new_len = replacement->len + value->len - len;
 
+    //如果替换后值的比原值长
     if (replacement->len > len) {
 
+        //申请新的空间
         data = ngx_pnalloc(r->pool, new_len + 1);
         if (data == NULL) {
             return NGX_ERROR;
         }
 
+        //复制prefix
         p = ngx_copy(data, value->data, prefix);
+        //复制替换后的值
         p = ngx_copy(p, replacement->data, replacement->len);
 
+        //复制prefix+len之后的部分
         ngx_memcpy(p, value->data + prefix + len,
                    value->len - len - prefix + 1);
 
         value->data = data;
 
     } else {
+        //将prefix之后的几个字符替换成replacement
         p = ngx_copy(value->data + prefix, replacement->data, replacement->len);
 
         ngx_memmove(p, value->data + prefix + len,
                     value->len - len - prefix + 1);
     }
 
+    //重置len
     value->len = new_len;
 
     return NGX_OK;
 }
 
 
+/**
+ * 遍历ngx_http_proxy_vars， 注册本模块提供的变量
+ */
 static ngx_int_t
 ngx_http_proxy_add_variables(ngx_conf_t *cf)
 {
@@ -3501,6 +3865,9 @@ ngx_http_proxy_add_variables(ngx_conf_t *cf)
 }
 
 
+/**
+ * 创建main级别配置文件结构
+ */
 static void *
 ngx_http_proxy_create_main_conf(ngx_conf_t *cf)
 {
@@ -3524,11 +3891,15 @@ ngx_http_proxy_create_main_conf(ngx_conf_t *cf)
 }
 
 
+/**
+ * 创建loc级别配置结构体
+ */
 static void *
 ngx_http_proxy_create_loc_conf(ngx_conf_t *cf)
 {
     ngx_http_proxy_loc_conf_t  *conf;
 
+    //创建配置结构体
     conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_proxy_loc_conf_t));
     if (conf == NULL) {
         return NULL;
@@ -3654,6 +4025,10 @@ ngx_http_proxy_create_loc_conf(ngx_conf_t *cf)
 }
 
 
+/**
+ * 合并loc级别配置
+ * 调用ngx_http_proxy_init_headers函数初始header，初始化headers_names为hash表
+ */
 static char *
 ngx_http_proxy_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 {
@@ -4095,9 +4470,11 @@ ngx_http_proxy_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
     if (clcf->lmt_excpt && clcf->handler == NULL
         && (conf->upstream.upstream || conf->proxy_lengths))
     {
+        //content_handler
         clcf->handler = ngx_http_proxy_handler;
     }
 
+    //proxy_set_body 
     if (conf->body_source.data == NULL) {
         conf->body_flushes = prev->body_flushes;
         conf->body_source = prev->body_source;
@@ -4105,12 +4482,13 @@ ngx_http_proxy_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
         conf->body_values = prev->body_values;
     }
 
+    //编译复杂变量 body_source
     if (conf->body_source.data && conf->body_lengths == NULL) {
 
         ngx_memzero(&sc, sizeof(ngx_http_script_compile_t));
 
         sc.cf = cf;
-        sc.source = &conf->body_source;
+        sc.source = &conf->body_source;     //包含变量的原始值
         sc.flushes = &conf->body_flushes;
         sc.lengths = &conf->body_lengths;
         sc.values = &conf->body_values;
@@ -4124,6 +4502,7 @@ ngx_http_proxy_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 
     ngx_conf_merge_ptr_value(conf->headers_source, prev->headers_source, NULL);
 
+    //headers_source是proxy_set_header 设置的值
     if (conf->headers_source == prev->headers_source) {
         conf->headers = prev->headers;
 #if (NGX_HTTP_CACHE)
@@ -4131,6 +4510,7 @@ ngx_http_proxy_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 #endif
     }
 
+    //根据headers_cache初始化并构建conf->headers数组，初始化headers_names为hash表
     rc = ngx_http_proxy_init_headers(cf, conf, &conf->headers,
                                      ngx_http_proxy_headers);
     if (rc != NGX_OK) {
@@ -4167,6 +4547,12 @@ ngx_http_proxy_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 }
 
 
+/**
+ * ngx_http_proxy_merge_loc_conf 调用
+ * 创建编译表示指令的headers数组
+ * 1.conf->headers_source和default_headers结果合并
+ * 
+ */
 static ngx_int_t
 ngx_http_proxy_init_headers(ngx_conf_t *cf, ngx_http_proxy_loc_conf_t *conf,
     ngx_http_proxy_headers_t *headers, ngx_keyval_t *default_headers)
@@ -4182,32 +4568,40 @@ ngx_http_proxy_init_headers(ngx_conf_t *cf, ngx_http_proxy_loc_conf_t *conf,
     ngx_http_script_compile_t     sc;
     ngx_http_script_copy_code_t  *copy;
 
+    //分配了bucket，说明已经初始化完成了，不用再次初始化了。
     if (headers->hash.buckets) {
         return NGX_OK;
     }
 
+    //初始化动态数组headers_names， 存放所有的ngx_hash_key_t。 用于初始化最后的hash表初始化
     if (ngx_array_init(&headers_names, cf->temp_pool, 4, sizeof(ngx_hash_key_t))
         != NGX_OK)
     {
         return NGX_ERROR;
     }
 
+    //初始化动态数组headers_merged， 用于存放 conf->headers_source和default_headers的合并结果
+    // 如果配置文件和默认的有冲突，取配置文件的。
     if (ngx_array_init(&headers_merged, cf->temp_pool, 4, sizeof(ngx_keyval_t))
         != NGX_OK)
     {
         return NGX_ERROR;
     }
 
+    //创建存放计算length的code数组
     headers->lengths = ngx_array_create(cf->pool, 64, 1);
     if (headers->lengths == NULL) {
         return NGX_ERROR;
     }
 
+    //创建存放计算value的code数组
     headers->values = ngx_array_create(cf->pool, 512, 1);
     if (headers->values == NULL) {
         return NGX_ERROR;
     }
 
+    /*合并conf->headers_source和default_headers*/
+    //1.将由proxy_pass设置的headers_source复制进headers_merged中
     if (conf->headers_source) {
 
         src = conf->headers_source->elts;
@@ -4222,17 +4616,20 @@ ngx_http_proxy_init_headers(ngx_conf_t *cf, ngx_http_proxy_loc_conf_t *conf,
         }
     }
 
+    //2. 将default_headers 合并入headers_merged中
     h = default_headers;
 
     while (h->key.len) {
 
         src = headers_merged.elts;
+        //遍历headers_merged动态数组，查找是否已经有相同的了
         for (i = 0; i < headers_merged.nelts; i++) {
             if (ngx_strcasecmp(h->key.data, src[i].key.data) == 0) {
                 goto next;
             }
         }
 
+        //加入
         s = ngx_array_push(&headers_merged);
         if (s == NULL) {
             return NGX_ERROR;
@@ -4246,15 +4643,18 @@ ngx_http_proxy_init_headers(ngx_conf_t *cf, ngx_http_proxy_loc_conf_t *conf,
     }
 
 
+    //遍历所有的ngx_keyval_t数组
     src = headers_merged.elts;
     for (i = 0; i < headers_merged.nelts; i++) {
 
+        //向 headers_names 中加入一个ngx_hash_key_t。 用于最后的hash初始化
         hk = ngx_array_push(&headers_names);
         if (hk == NULL) {
             return NGX_ERROR;
         }
 
         hk->key = src[i].key;
+        //计算hash值
         hk->key_hash = ngx_hash_key_lc(src[i].key.data, src[i].key.len);
         hk->value = (void *) 1;
 
@@ -4262,6 +4662,7 @@ ngx_http_proxy_init_headers(ngx_conf_t *cf, ngx_http_proxy_loc_conf_t *conf,
             continue;
         }
 
+        //向headers->lengths中添加一条计算常量值长度的指令
         copy = ngx_array_push_n(headers->lengths,
                                 sizeof(ngx_http_script_copy_code_t));
         if (copy == NULL) {
@@ -4276,6 +4677,7 @@ ngx_http_proxy_init_headers(ngx_conf_t *cf, ngx_http_proxy_loc_conf_t *conf,
                 + src[i].key.len + sizeof(uintptr_t) - 1)
                & ~(sizeof(uintptr_t) - 1);
 
+        //向headers->values中添加一条计算常量值的指令
         copy = ngx_array_push_n(headers->values, size);
         if (copy == NULL) {
             return NGX_ERROR;
@@ -4289,6 +4691,7 @@ ngx_http_proxy_init_headers(ngx_conf_t *cf, ngx_http_proxy_loc_conf_t *conf,
 
         ngx_memzero(&sc, sizeof(ngx_http_script_compile_t));
 
+        //编译复杂变量proxy_set_header key valuue中的value
         sc.cf = cf;
         sc.source = &src[i].value;
         sc.flushes = &headers->flushes;
@@ -4299,6 +4702,9 @@ ngx_http_proxy_init_headers(ngx_conf_t *cf, ngx_http_proxy_loc_conf_t *conf,
             return NGX_ERROR;
         }
 
+        //两个header在数组中会用null隔开
+
+        //添加NULL结尾标志
         code = ngx_array_push_n(headers->lengths, sizeof(uintptr_t));
         if (code == NULL) {
             return NGX_ERROR;
@@ -4306,6 +4712,7 @@ ngx_http_proxy_init_headers(ngx_conf_t *cf, ngx_http_proxy_loc_conf_t *conf,
 
         *code = (uintptr_t) NULL;
 
+       //添加NULL结尾标志
         code = ngx_array_push_n(headers->values, sizeof(uintptr_t));
         if (code == NULL) {
             return NGX_ERROR;
@@ -4314,6 +4721,7 @@ ngx_http_proxy_init_headers(ngx_conf_t *cf, ngx_http_proxy_loc_conf_t *conf,
         *code = (uintptr_t) NULL;
     }
 
+    //设置NULL， 指令结尾标识
     code = ngx_array_push_n(headers->lengths, sizeof(uintptr_t));
     if (code == NULL) {
         return NGX_ERROR;
@@ -4322,6 +4730,7 @@ ngx_http_proxy_init_headers(ngx_conf_t *cf, ngx_http_proxy_loc_conf_t *conf,
     *code = (uintptr_t) NULL;
 
 
+    //初始化 proxy_headers_hash 表
     hash.hash = &headers->hash;
     hash.key = ngx_hash_key_lc;
     hash.max_size = conf->headers_hash_max_size;
@@ -4334,6 +4743,18 @@ ngx_http_proxy_init_headers(ngx_conf_t *cf, ngx_http_proxy_loc_conf_t *conf,
 }
 
 
+/**
+ * proxy_pass 配置指令解析
+ * 
+ * proxy_pass URL;
+ * 
+ * https://www.aikaiyuan.com/11420.html
+ * 根据proxy_pass后的URL中是否有变量和是否有uri，转到上游的url不同：
+    有变量有uri：转到上游的请求url是proxy_pass 的URL中的uri。
+    有变量无uri：转到上游的请求url是原来请求的url。
+    无变量有uri：转到上游的请求url是proxy_pass 的URL中的uri ＋ 原来请求去掉location 的name剩下的url。
+    无变量无uri：转到上游的请求url是原来请求的url。
+ */
 static char *
 ngx_http_proxy_pass(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -4347,14 +4768,17 @@ ngx_http_proxy_pass(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_http_core_loc_conf_t   *clcf;
     ngx_http_script_compile_t   sc;
 
+    //判断是否在一个location重复配置proxy_pass指令。
     if (plcf->upstream.upstream || plcf->proxy_lengths) {
         return "is duplicate";
     }
 
     clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
 
+    //为该location注册content_handler
     clcf->handler = ngx_http_proxy_handler;
 
+    //如果location以/结尾
     if (clcf->name.len && clcf->name.data[clcf->name.len - 1] == '/') {
         clcf->auto_redirect = 1;
     }
@@ -4363,20 +4787,26 @@ ngx_http_proxy_pass(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     url = &value[1];
 
+    //计算url中$字符的个数(根据url里是否有变量，处理逻辑不同)
     n = ngx_http_script_variables_count(url);
 
+    //proxy_pass 对应的域名解析分为有变量和没有变量，没有变量的是在启动阶段解析，而有变量的是在每次请求解析的
+    //1.如果proxy_pass后面的参数是变量，解析函数会把变量存放到ngx_http_proxy_loc_conf_t结构中的proxy_values数组中
     if (n) {
 
+        //复杂变量求值, 首先初始化ngx_http_script_compile_t结构对应的sc变量
         ngx_memzero(&sc, sizeof(ngx_http_script_compile_t));
 
         sc.cf = cf;
-        sc.source = url;
-        sc.lengths = &plcf->proxy_lengths;
-        sc.values = &plcf->proxy_values;
-        sc.variables = n;
+        sc.source = url;    //url 原始值
+        sc.lengths = &plcf->proxy_lengths;      //依次存的是计算变量长度的执行单元(code)
+        sc.values = &plcf->proxy_values;        //依次存在的是计算变量值的执行单元(code)
+        sc.variables = n;   //变量个数
         sc.complete_lengths = 1;
         sc.complete_values = 1;
 
+        //编译sc，输出是sc.lengths和sc.values
+        //有变量则调用ngx_http_script_compile函数把变量的回调函数添加到plcf->proxy_lengths和plcf->proxy_values数组中
         if (ngx_http_script_compile(&sc) != NGX_OK) {
             return NGX_CONF_ERROR;
         }
@@ -4388,6 +4818,12 @@ ngx_http_proxy_pass(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_OK;
     }
 
+    /**此处说明url中不包含变量 */
+
+    //2.如果proxy-pass后面的参数不是变量，则会在配置解析阶段解析后面upstream主机的ip地址并且生成upstream结构并且和ngx_http_proxy_loc_conf_t中的upstream结构连接起来
+
+
+    //url->data 必须以 http:// 或 https:// 开头
     if (ngx_strncasecmp(url->data, (u_char *) "http://", 7) == 0) {
         add = 7;
         port = 80;
@@ -4412,21 +4848,26 @@ ngx_http_proxy_pass(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     ngx_memzero(&u, sizeof(ngx_url_t));
 
+    //去掉前缀 http://或 https://
     u.url.len = url->len - add;
     u.url.data = url->data + add;
     u.default_port = port;
     u.uri_part = 1;
     u.no_resolve = 1;
 
+    //添加一个代表upstream{}配置块的结构体
     plcf->upstream.upstream = ngx_http_upstream_add(cf, &u, 0);
     if (plcf->upstream.upstream == NULL) {
         return NGX_CONF_ERROR;
     }
 
+    //schema的长度
     plcf->vars.schema.len = add;
+    //schema
     plcf->vars.schema.data = url->data;
     plcf->vars.key_start = plcf->vars.schema;
 
+    //主要设置plcf->vars相关属性
     ngx_http_proxy_set_vars(&u, &plcf->vars);
 
     plcf->location = clcf->name;
@@ -4456,6 +4897,19 @@ ngx_http_proxy_pass(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_redirect
+ * 
+ * proxy_redirect 配置指令解析
+ * 
+ * Syntax:	proxy_redirect default;
+            proxy_redirect off;
+            proxy_redirect redirect replacement;
+Default:	
+            proxy_redirect default;
+Context:	http, server, location
+
+ */
 static char *
 ngx_http_proxy_redirect(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -4475,6 +4929,7 @@ ngx_http_proxy_redirect(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     value = cf->args->elts;
 
     if (cf->args->nelts == 2) {
+        //proxy_redirect off;
         if (ngx_strcmp(value[1].data, "off") == 0) {
 
             if (plcf->redirects) {
@@ -4485,6 +4940,7 @@ ngx_http_proxy_redirect(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             return NGX_CONF_OK;
         }
 
+        //proxy_redirect default;
         if (ngx_strcmp(value[1].data, "default") != 0) {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                                "invalid parameter \"%V\"", &value[1]);
@@ -4492,6 +4948,8 @@ ngx_http_proxy_redirect(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         }
     }
 
+    //proxy_redirect redirect replacement;
+    //添加一条表示proxy_redirect指令的ngx_http_proxy_rewrite_t结构体
     if (plcf->redirects == NULL) {
         plcf->redirects = ngx_array_create(cf->pool, 1,
                                            sizeof(ngx_http_proxy_rewrite_t));
@@ -4500,11 +4958,13 @@ ngx_http_proxy_redirect(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         }
     }
 
+    //一个loc下可以配置多条proxy_redirect指令
     pr = ngx_array_push(plcf->redirects);
     if (pr == NULL) {
         return NGX_CONF_ERROR;
     }
 
+    //proxy_redirect default;  proxy_pass中的url作为redirect；location中的url作为replacement
     if (cf->args->nelts == 2
         && ngx_strcmp(value[1].data, "default") == 0)
     {
@@ -4528,6 +4988,7 @@ ngx_http_proxy_redirect(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
         ngx_memzero(&pr->replacement, sizeof(ngx_http_complex_value_t));
 
+        //proxy_pass中的url作为redirect；location中的url作为replacement
         if (plcf->vars.uri.len) {
             pr->pattern.complex.value = plcf->url;
             pr->replacement.value = plcf->location;
@@ -4552,10 +5013,12 @@ ngx_http_proxy_redirect(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     }
 
 
+    //正则表达式场景
     if (value[1].data[0] == '~') {
         value[1].len--;
         value[1].data++;
 
+        //忽略大小写
         if (value[1].data[0] == '*') {
             value[1].len--;
             value[1].data++;
@@ -4565,6 +5028,7 @@ ngx_http_proxy_redirect(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             }
 
         } else {
+            //不忽略大小写
             if (ngx_http_proxy_rewrite_regex(cf, pr, &value[1], 0) != NGX_OK) {
                 return NGX_CONF_ERROR;
             }
@@ -4572,6 +5036,7 @@ ngx_http_proxy_redirect(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     } else {
 
+        //复杂变量场景
         ngx_memzero(&ccv, sizeof(ngx_http_compile_complex_value_t));
 
         ccv.cf = cf;
@@ -4588,6 +5053,7 @@ ngx_http_proxy_redirect(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     ngx_memzero(&ccv, sizeof(ngx_http_compile_complex_value_t));
 
+    //pr->replacement 始终为复杂变量
     ccv.cf = cf;
     ccv.value = &value[2];
     ccv.complex_value = &pr->replacement;
@@ -4600,6 +5066,17 @@ ngx_http_proxy_redirect(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * 
+ * https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_cookie_domain
+ * 
+ * Syntax:	proxy_cookie_domain off;
+            proxy_cookie_domain domain replacement;
+   Default: proxy_cookie_domain off;
+   Context:	http, server, location
+ * 
+ * proxy_cookie_domain 配置指令解析
+ */
 static char *
 ngx_http_proxy_cookie_domain(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -4609,14 +5086,17 @@ ngx_http_proxy_cookie_domain(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_http_proxy_rewrite_t          *pr;
     ngx_http_compile_complex_value_t   ccv;
 
+    //不允许重复
     if (plcf->cookie_domains == NULL) {
         return "is duplicate";
     }
 
     value = cf->args->elts;
 
+    //proxy_cookie_domain off
     if (cf->args->nelts == 2) {
 
+        //两个参数时，只能为off
         if (ngx_strcmp(value[1].data, "off") == 0) {
 
             if (plcf->cookie_domains != NGX_CONF_UNSET_PTR) {
@@ -4632,6 +5112,9 @@ ngx_http_proxy_cookie_domain(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
+    /* proxy_cookie_domain domain replacement; 格式  */
+
+    //初始化动态数组
     if (plcf->cookie_domains == NGX_CONF_UNSET_PTR) {
         plcf->cookie_domains = ngx_array_create(cf->pool, 1,
                                      sizeof(ngx_http_proxy_rewrite_t));
@@ -4640,11 +5123,13 @@ ngx_http_proxy_cookie_domain(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         }
     }
 
+    //添加一个元素
     pr = ngx_array_push(plcf->cookie_domains);
     if (pr == NULL) {
         return NGX_CONF_ERROR;
     }
 
+    //value[1] 为正则表达式，匹配上游响应头里Set-Cookie里的domain字段
     if (value[1].data[0] == '~') {
         value[1].len--;
         value[1].data++;
@@ -4654,7 +5139,9 @@ ngx_http_proxy_cookie_domain(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         }
 
     } else {
+        //value[1] 为复杂变量
 
+        //忽略前置的.
         if (value[1].data[0] == '.') {
             value[1].len--;
             value[1].data++;
@@ -4666,12 +5153,15 @@ ngx_http_proxy_cookie_domain(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         ccv.value = &value[1];
         ccv.complex_value = &pr->pattern.complex;
 
+        //编译复杂变量
         if (ngx_http_compile_complex_value(&ccv) != NGX_OK) {
             return NGX_CONF_ERROR;
         }
 
+        //设置handler
         pr->handler = ngx_http_proxy_rewrite_domain_handler;
 
+        //replacement中的前置.也会被忽略
         if (value[2].data[0] == '.') {
             value[2].len--;
             value[2].data++;
@@ -4680,6 +5170,7 @@ ngx_http_proxy_cookie_domain(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     ngx_memzero(&ccv, sizeof(ngx_http_compile_complex_value_t));
 
+    //编译复杂变量pr->replacement
     ccv.cf = cf;
     ccv.value = &value[2];
     ccv.complex_value = &pr->replacement;
@@ -4692,6 +5183,9 @@ ngx_http_proxy_cookie_domain(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * proxy_cookie_path 配置指令解析
+ */
 static char *
 ngx_http_proxy_cookie_path(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -4784,6 +5278,9 @@ ngx_http_proxy_cookie_path(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * proxy_cookie_flags 配置指令解析
+ */
 static char *
 ngx_http_proxy_cookie_flags(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -4904,6 +5401,16 @@ ngx_http_proxy_cookie_flags(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * 一条正则重写指令
+ * 
+ * proxy_cookie_domain domain replacement;
+ * 
+ * domain为正则的场景。
+ * 1.编译正则表达式
+ * 2.设置pr->handler为ngx_http_proxy_rewrite_regex_handler
+ * 
+ */
 static ngx_int_t
 ngx_http_proxy_rewrite_regex(ngx_conf_t *cf, ngx_http_proxy_rewrite_t *pr,
     ngx_str_t *regex, ngx_uint_t caseless)
@@ -4922,11 +5429,13 @@ ngx_http_proxy_rewrite_regex(ngx_conf_t *cf, ngx_http_proxy_rewrite_t *pr,
         rc.options = NGX_REGEX_CASELESS;
     }
 
+    //编译正则表达式
     pr->pattern.regex = ngx_http_regex_compile(cf, &rc);
     if (pr->pattern.regex == NULL) {
         return NGX_ERROR;
     }
 
+    //设置handler
     pr->handler = ngx_http_proxy_rewrite_regex_handler;
 
     return NGX_OK;
@@ -4941,6 +5450,9 @@ ngx_http_proxy_rewrite_regex(ngx_conf_t *cf, ngx_http_proxy_rewrite_t *pr,
 }
 
 
+/**
+ * proxy_store 配置指令解析
+ */
 static char *
 ngx_http_proxy_store(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -5000,6 +5512,13 @@ ngx_http_proxy_store(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
 #if (NGX_HTTP_CACHE)
 
+/**
+ * https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_cache
+ * 
+ * proxy_cache 配置指令解析
+ * 
+ * proxy_cache zone | off;
+ */
 static char *
 ngx_http_proxy_cache(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -5032,10 +5551,12 @@ ngx_http_proxy_cache(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ccv.value = &value[1];
     ccv.complex_value = &cv;
 
+    //编译复杂变量
     if (ngx_http_compile_complex_value(&ccv) != NGX_OK) {
         return NGX_CONF_ERROR;
     }
 
+    //包含变量
     if (cv.lengths != NULL) {
 
         plcf->upstream.cache_value = ngx_palloc(cf->pool,
@@ -5049,6 +5570,7 @@ ngx_http_proxy_cache(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_OK;
     }
 
+    //不包含变量
     plcf->upstream.cache_zone = ngx_shared_memory_add(cf, &value[1], 0,
                                                       &ngx_http_proxy_module);
     if (plcf->upstream.cache_zone == NULL) {
@@ -5059,6 +5581,16 @@ ngx_http_proxy_cache(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_cache_key
+ * proxy_cache_key 配置指令解析
+ * 
+ * Defines a key for caching
+ * 
+ * Syntax:	proxy_cache_key string;
+   Default:	proxy_cache_key $scheme$proxy_host$request_uri;
+   Context:	http, server, location
+ */
 static char *
 ngx_http_proxy_cache_key(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -5079,6 +5611,7 @@ ngx_http_proxy_cache_key(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ccv.value = &value[1];
     ccv.complex_value = &plcf->cache_key;
 
+    //编译复杂变量  
     if (ngx_http_compile_complex_value(&ccv) != NGX_OK) {
         return NGX_CONF_ERROR;
     }
@@ -5091,6 +5624,9 @@ ngx_http_proxy_cache_key(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
 #if (NGX_HTTP_SSL)
 
+/**
+ * proxy_ssl_certificate_cache 配置指令解析
+ */
 static char *
 ngx_http_proxy_ssl_certificate_cache(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -5185,6 +5721,9 @@ ngx_http_proxy_ssl_certificate_cache(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * proxy_ssl_password_file 配置指令解析
+ */
 static char *
 ngx_http_proxy_ssl_password_file(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -5398,12 +5937,15 @@ ngx_http_proxy_set_ssl(ngx_conf_t *cf, ngx_http_proxy_loc_conf_t *plcf)
 static void
 ngx_http_proxy_set_vars(ngx_url_t *u, ngx_http_proxy_vars_t *v)
 {
-    if (u->family != AF_UNIX) {
+    if (u->family != AF_UNIX) {     //非unix://
 
+        //说明url里没配置port
         if (u->no_port || u->port == u->default_port) {
 
+            //host
             v->host_header = u->host;
 
+            //默认端口
             if (u->default_port == 80) {
                 ngx_str_set(&v->port, "80");
 
@@ -5412,6 +5954,7 @@ ngx_http_proxy_set_vars(ngx_url_t *u, ngx_http_proxy_vars_t *v)
             }
 
         } else {
+            //url里配置了port， len=host+1+port
             v->host_header.len = u->host.len + 1 + u->port_text.len;
             v->host_header.data = u->host.data;
             v->port = u->port_text;
@@ -5420,6 +5963,7 @@ ngx_http_proxy_set_vars(ngx_url_t *u, ngx_http_proxy_vars_t *v)
         v->key_start.len += v->host_header.len;
 
     } else {
+        //如果是unix套接字
         ngx_str_set(&v->host_header, "localhost");
         ngx_str_null(&v->port);
         v->key_start.len += sizeof("unix:") - 1 + u->host.len + 1;

@@ -3,6 +3,9 @@
 # Copyright (C) Nginx, Inc.
 
 
+#该脚本根据不同的条件，输出不同的模块列表，最后输出的模块列表的文件在objs/ngx_modules.c：
+#这个文件会决定所有模块的顺序，这会直接影响到最后的功能
+
 if [ $EVENT_SELECT = NO -a $EVENT_FOUND = NO ]; then
     EVENT_SELECT=YES
 fi
@@ -1245,6 +1248,10 @@ fi
 #fi
 
 
+#这段代码比较简单，确实现了nginx很强大的扩展性，加载第三方模块。
+# $ngx_addon_dir变量是在configure执行时，命令行参数–add-module加入的，它是一个目录列表，每一个目录，表示一个第三方模块。
+# 从代码中，可以看到，它就是针对每一个第三方模块执行其目录下的config文件。
+# 于是可以在config文件里面执行我们自己的检测逻辑，比如检测库依赖，添加编译选项等。
 if test -n "$NGX_ADDONS"; then
 
     echo configuring additional modules
@@ -1263,6 +1270,7 @@ if test -n "$NGX_ADDONS"; then
         ngx_module_link=ADDON
 
         if test -f $ngx_addon_dir/config; then
+            # 执行第三方模块的配置
             . $ngx_addon_dir/config
 
             echo " + $ngx_addon_name was configured"

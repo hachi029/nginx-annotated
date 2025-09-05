@@ -111,6 +111,11 @@ struct ngx_ssl_s {
 };
 
 
+/**
+ * 相对于ngx_connection_t, ngx_ssl_connection_t是nginx对ssl连接的描述结构，记录了ssl连接的信息和状态 
+ * 
+ * 保留连接的所有与ssl相关的数据，包括SSL_CTX 和 SSL.  recv, send, recv_chain,  send_chain 处理程序设置为启用SSL的功能
+ */
 struct ngx_ssl_connection_s {
     ngx_ssl_conn_t             *connection;
     SSL_CTX                    *session_ctx;
@@ -131,6 +136,7 @@ struct ngx_ssl_connection_s {
 
     u_char                      early_buf;
 
+    //若ssl握手完成 (c->ssl->handshaked由ngx_ssl_handshake()确定握手完成后设为1)
     unsigned                    handshaked:1;
     unsigned                    handshake_rejected:1;
     unsigned                    renegotiation:1;

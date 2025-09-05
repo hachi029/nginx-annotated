@@ -23,6 +23,12 @@ typedef struct ngx_http_v2_stream_s   ngx_http_v2_stream_t;
 typedef struct ngx_http_v3_parse_s    ngx_http_v3_parse_t;
 typedef struct ngx_http_v3_session_s  ngx_http_v3_session_t;
 
+/**
+ * 解析出特定请求头后的回调，参考ngx_http_headers_in数组
+ * r: 当前请求
+ * h: 指向该请求头在headers_in.headers链表中对应节点的指针
+ * offset: 该请求头对应字段在ngx_http_headers_in_t结构中的偏移
+ */
 typedef ngx_int_t (*ngx_http_header_handler_pt)(ngx_http_request_t *r,
     ngx_table_elt_t *h, ngx_uint_t offset);
 typedef u_char *(*ngx_http_log_handler_pt)(ngx_http_request_t *r,
@@ -68,12 +74,15 @@ struct ngx_http_chunked_s {
 };
 
 
+/**
+ * 表示响应状态行
+ */
 typedef struct {
     ngx_uint_t           http_version;
-    ngx_uint_t           code;
+    ngx_uint_t           code;      //响应码
     ngx_uint_t           count;
-    u_char              *start;
-    u_char              *end;
+    u_char              *start;     //响应状态行起始位置
+    u_char              *end;       //响应状态行结束位置
 } ngx_http_status_t;
 
 

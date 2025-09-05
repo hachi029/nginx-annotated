@@ -10,36 +10,46 @@
 #include <ngx_http.h>
 
 
+/**
+ * 表示一个虚拟节点， 一个真实节点，一般会对应weight * 160个虚拟节点。
+ * 
+ */
 typedef struct {
-    uint32_t                            hash;
-    ngx_str_t                          *server;
+    uint32_t                            hash;       /* 虚拟节点的哈希值 */
+    ngx_str_t                          *server;     /* 虚拟节点归属的真实节点，对应真实节点的server成员 */
 } ngx_http_upstream_chash_point_t;
 
 
+/**
+ * 表示整个虚拟环
+ */
 typedef struct {
-    ngx_uint_t                          number;
-    ngx_http_upstream_chash_point_t     point[1];
+    ngx_uint_t                          number;         /* 虚拟节点的个数 */
+    ngx_http_upstream_chash_point_t     point[1];       /* 虚拟节点的数组首地址 */
 } ngx_http_upstream_chash_points_t;
 
 
+/**
+ * 本模块的配置结构体
+ */
 typedef struct {
-    ngx_http_complex_value_t            key;
+    ngx_http_complex_value_t            key;        /* 关联hash指令的第一个参数，用于计算请求的hash值 */
 #if (NGX_HTTP_UPSTREAM_ZONE)
     ngx_uint_t                          config;
 #endif
-    ngx_http_upstream_chash_points_t   *points;
+    ngx_http_upstream_chash_points_t   *points;     /* 虚拟节点的数组 */
 } ngx_http_upstream_hash_srv_conf_t;
 
 
 typedef struct {
     /* the round robin data must be first */
-    ngx_http_upstream_rr_peer_data_t    rrp;
-    ngx_http_upstream_hash_srv_conf_t  *conf;
-    ngx_str_t                           key;
-    ngx_uint_t                          tries;
-    ngx_uint_t                          rehash;
-    uint32_t                            hash;
-    ngx_event_get_peer_pt               get_rr_peer;
+    ngx_http_upstream_rr_peer_data_t    rrp;        /* round robin的per request负载均衡数据 */
+    ngx_http_upstream_hash_srv_conf_t  *conf;       /* server配置块 */
+    ngx_str_t                           key;        /* 对于本次请求，hash指令的第一个参数的具体值，用于计算本次请求的哈希值 */
+    ngx_uint_t                          tries;      /* 已经尝试的虚拟节点数 */
+    ngx_uint_t                          rehash;     /* 本算法不使用此成员 */
+    uint32_t                            hash;       /* 根据请求的哈希值，找到顺时方向最近的一个虚拟节点，hash为该虚拟节点在数组中的索引 */
+    ngx_event_get_peer_pt               get_rr_peer;/* round robin算法的peer.get函数 */
 } ngx_http_upstream_hash_peer_data_t;
 
 
@@ -70,6 +80,7 @@ static char *ngx_http_upstream_hash(ngx_conf_t *cf, ngx_command_t *cmd,
 
 static ngx_command_t  ngx_http_upstream_hash_commands[] = {
 
+    //在一个upstream配置块中，如果有hash指令，则使用的负载均衡算法为哈希算法，
     { ngx_string("hash"),
       NGX_HTTP_UPS_CONF|NGX_CONF_TAKE12,
       ngx_http_upstream_hash,
@@ -81,6 +92,14 @@ static ngx_command_t  ngx_http_upstream_hash_commands[] = {
 };
 
 
+/**
+ * https://www.kancloud.cn/digest/sknginx/130034
+ * 
+ * 当后端是缓存服务器时，经常使用一致性哈希算法来进行负载均衡。
+ * 
+ * 使用一致性哈希的好处在于，增减集群的缓存服务器时，只有少量的缓存会失效，回源量较小。
+ * 
+ */
 static ngx_http_module_t  ngx_http_upstream_hash_module_ctx = {
     NULL,                                  /* preconfiguration */
     NULL,                                  /* postconfiguration */
@@ -112,6 +131,9 @@ ngx_module_t  ngx_http_upstream_hash_module = {
 };
 
 
+/**
+ * 
+ */
 static ngx_int_t
 ngx_http_upstream_init_hash(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *us)
 {
@@ -125,6 +147,10 @@ ngx_http_upstream_init_hash(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *us)
 }
 
 
+/**
+ * hash算法的per request负载均衡初始化函数。
+ * 
+ */
 static ngx_int_t
 ngx_http_upstream_init_hash_peer(ngx_http_request_t *r,
     ngx_http_upstream_srv_conf_t *us)
@@ -139,6 +165,7 @@ ngx_http_upstream_init_hash_peer(ngx_http_request_t *r,
 
     r->upstream->peer.data = &hp->rrp;
 
+    /* 调用round robin的per request负载均衡初始化函数 */
     if (ngx_http_upstream_init_round_robin_peer(r, us) != NGX_OK) {
         return NGX_ERROR;
     }
@@ -147,6 +174,7 @@ ngx_http_upstream_init_hash_peer(ngx_http_request_t *r,
 
     hcf = ngx_http_conf_upstream_srv_conf(us, ngx_http_upstream_hash_module);
 
+    /* 获取本请求对应的hash指令的第一个参数值，用于计算请求的hash值 */
     if (ngx_http_complex_value(r, &hcf->key, &hp->key) != NGX_OK) {
         return NGX_ERROR;
     }
@@ -158,7 +186,7 @@ ngx_http_upstream_init_hash_peer(ngx_http_request_t *r,
     hp->tries = 0;
     hp->rehash = 0;
     hp->hash = 0;
-    hp->get_rr_peer = ngx_http_upstream_get_round_robin_peer;
+    hp->get_rr_peer = ngx_http_upstream_get_round_robin_peer;       /* round robin的peer.get函数 */
 
     return NGX_OK;
 }
@@ -295,13 +323,24 @@ ngx_http_upstream_get_hash_peer(ngx_peer_connection_t *pc, void *data)
 }
 
 
+/**
+ * 在执行ngx_http_upstream_module的init main conf函数时，会调用所有upstream块的初始化函数。
+ * 对于使用一致性哈希的upstream块，其初始化函数（peer.init_upstream）就是此函数
+ * 
+ * 主要工作：
+ *  调用round robin的upstream块初始化函数来创建和初始化真实节点
+ *  指定per request的负载均衡初始化函数peer.init
+ *  创建和初始化虚拟节点数组，使该数组中的虚拟节点有序而不重复
+ */
 static ngx_int_t
 ngx_http_upstream_init_chash(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *us)
 {
+    /* 使用round robin的upstream块初始化函数，创建和初始化真实节点 */
     if (ngx_http_upstream_init_round_robin(cf, us) != NGX_OK) {
         return NGX_ERROR;
     }
 
+    /* 重新设置per request的负载均衡初始化函数 */
     us->peer.init = ngx_http_upstream_init_chash_peer;
 
 #if (NGX_HTTP_UPSTREAM_ZONE)
@@ -314,6 +353,9 @@ ngx_http_upstream_init_chash(ngx_conf_t *cf, ngx_http_upstream_srv_conf_t *us)
 }
 
 
+/**
+ * 构建虚拟环
+ */
 static ngx_int_t
 ngx_http_upstream_update_chash(ngx_pool_t *pool,
     ngx_http_upstream_srv_conf_t *us)
@@ -342,6 +384,7 @@ ngx_http_upstream_update_chash(ngx_pool_t *pool,
     peers = us->peer.data;
     npoints = peers->total_weight * 160;
 
+    /* 一共创建npoints个虚拟节点 */
     size = sizeof(ngx_http_upstream_chash_points_t)
            - sizeof(ngx_http_upstream_chash_point_t)
            + sizeof(ngx_http_upstream_chash_point_t) * npoints;
@@ -358,6 +401,7 @@ ngx_http_upstream_update_chash(ngx_pool_t *pool,
         return NGX_OK;
     }
 
+    /* 初始化所有的虚拟节点 */
     for (peer = peers->peer; peer; peer = peer->next) {
         server = &peer->server;
 
@@ -376,6 +420,7 @@ ngx_http_upstream_update_chash(ngx_pool_t *pool,
             goto done;
         }
 
+        /* 把每个peer的server成员，解析为HOST和PORT */
         for (j = 0; j < server->len; j++) {
             c = server->data[server->len - j - 1];
 
@@ -387,7 +432,7 @@ ngx_http_upstream_update_chash(ngx_pool_t *pool,
                 goto done;
             }
 
-            if (c < '0' || c > '9') {
+            if (c < '0' || c > '9') {       /* 表示没有指定端口 */
                 break;
             }
         }
@@ -399,11 +444,13 @@ ngx_http_upstream_update_chash(ngx_pool_t *pool,
 
     done:
 
+        /* 根据解析peer的server成员所得的HOST和PORT，计算虚拟节点的base_hash值 */
         ngx_crc32_init(base_hash);
         ngx_crc32_update(&base_hash, host, host_len);
-        ngx_crc32_update(&base_hash, (u_char *) "", 1);
+        ngx_crc32_update(&base_hash, (u_char *) "", 1);     /* 空字符串包含字符\0 */
         ngx_crc32_update(&base_hash, port, port_len);
 
+        /* 对于归属同一个真实节点的虚拟节点，它们的base_hash值相同，而prev_hash不同 */
         prev_hash.value = 0;
         npoints = peer->weight * 160;
 
@@ -413,8 +460,8 @@ ngx_http_upstream_update_chash(ngx_pool_t *pool,
             ngx_crc32_update(&hash, prev_hash.byte, 4);
             ngx_crc32_final(hash);
 
-            points->point[points->number].hash = hash;
-            points->point[points->number].server = server;
+            points->point[points->number].hash = hash;      /* 虚拟节点的哈希值 */
+            points->point[points->number].server = server;  /* 虚拟节点所归属的真实节点，对应真实节点的server成员 */
             points->number++;
 
 #if (NGX_HAVE_LITTLE_ENDIAN)
@@ -428,20 +475,23 @@ ngx_http_upstream_update_chash(ngx_pool_t *pool,
         }
     }
 
+    /* 使用快速排序，使虚拟节点数组的元素，按照其hash值从小到大有序 */
     ngx_qsort(points->point,
               points->number,
               sizeof(ngx_http_upstream_chash_point_t),
               ngx_http_upstream_chash_cmp_points);
 
+    /* 如果虚拟节点数组中，有多个元素的hash值相同，只保留第一个 */
     for (i = 0, j = 1; j < points->number; j++) {
         if (points->point[i].hash != points->point[j].hash) {
             points->point[++i] = points->point[j];
         }
     }
 
+    /* 经过上述步骤后，虚拟节点数组中的元素，有序而不重复 */
     points->number = i + 1;
 
-    hcf->points = points;
+    hcf->points = points;       /* 保存虚拟节点数组 */
 
     return NGX_OK;
 }
@@ -467,6 +517,13 @@ ngx_http_upstream_chash_cmp_points(const void *one, const void *two)
 }
 
 
+/**
+ * 
+ * 虚拟节点数组是有序的，事先已按照虚拟节点的hash值从小到大排序好了。
+ * 
+ * 现在使用二分查找，寻找第一个hash值大于等于请求的哈希值的虚拟节点，即“顺时针方向最近”的一个虚拟节点。
+ * 
+ */
 static ngx_uint_t
 ngx_http_upstream_find_chash_point(ngx_http_upstream_chash_points_t *points,
     uint32_t hash)
@@ -476,12 +533,12 @@ ngx_http_upstream_find_chash_point(ngx_http_upstream_chash_points_t *points,
 
     /* find first point >= hash */
 
-    point = &points->point[0];
+    point = &points->point[0];  //环上第1个虚拟节点
 
     i = 0;
     j = points->number;
 
-    while (i < j) {
+    while (i < j) {         //以二分法检索虚拟节点
         k = (i + j) / 2;
 
         if (hash > point[k].hash) {
@@ -491,7 +548,7 @@ ngx_http_upstream_find_chash_point(ngx_http_upstream_chash_points_t *points,
             j = k;
 
         } else {
-            return k;
+            return k;       //以二分法检索虚拟节点
         }
     }
 
@@ -499,6 +556,18 @@ ngx_http_upstream_find_chash_point(ngx_http_upstream_chash_points_t *points,
 }
 
 
+/**
+ * ngx_http_proxy_module模块的CONTENT_PHASE阶段的处理函数ngx_http_proxy_handler，
+ * 在初始化upstream机制的ngx_http_upstream_init_request函数中，调用在第二步中指定的peer.init，主要用于初始化请求的负载均衡数据。
+ * 对于一致性哈希，peer.init为ngx_http_upstream_init_chash_peer
+ * 
+ * 主要工作：
+ *  首先调用hash算法的per request负载均衡初始化函数，创建和初始化请求的负载均衡数据。
+ *  重新指定peer.get，用于选取一个真实节点来处理本次请求。
+ *  获取的本请求对应的hash指令的第一个参数值，计算请求的hash值。
+ *  寻找第一个hash值大于等于请求的哈希值的虚拟节点，即寻找“顺时针方向最近”的一个虚拟节点。
+ * 
+ */ 
 static ngx_int_t
 ngx_http_upstream_init_chash_peer(ngx_http_request_t *r,
     ngx_http_upstream_srv_conf_t *us)
@@ -507,15 +576,18 @@ ngx_http_upstream_init_chash_peer(ngx_http_request_t *r,
     ngx_http_upstream_hash_srv_conf_t   *hcf;
     ngx_http_upstream_hash_peer_data_t  *hp;
 
+    /* 调用hash算法的per request负载均衡初始化函数，创建和初始化请求的负载均衡数据 */
     if (ngx_http_upstream_init_hash_peer(r, us) != NGX_OK) {
         return NGX_ERROR;
     }
 
+     /* 重新指定peer.get，用于选取一个真实节点 */
     r->upstream->peer.get = ngx_http_upstream_get_chash_peer;
 
     hp = r->upstream->peer.data;
     hcf = ngx_http_conf_upstream_srv_conf(us, ngx_http_upstream_hash_module);
 
+     /* 根据获取的本请求对应的hash指令的第一个参数值，计算请求的hash值 */
     hash = ngx_crc32_long(hp->key.data, hp->key.len);
 
     ngx_http_upstream_rr_peers_rlock(hp->rrp.peers);
@@ -534,6 +606,9 @@ ngx_http_upstream_init_chash_peer(ngx_http_request_t *r,
 #endif
 
     if (hcf->points->number) {
+        /* 根据请求的hash值，找到顺时针方向最近的一个虚拟节点，hp->hash记录此虚拟节点
+        * 在数组中的索引。
+        */
         hp->hash = ngx_http_upstream_find_chash_point(hcf->points, hash);
     }
 
@@ -543,6 +618,20 @@ ngx_http_upstream_init_chash_peer(ngx_http_request_t *r,
 }
 
 
+/**
+ * 对于一致性哈希算法的peer.get函数
+ * 
+ * 其实在peer.init中，已经找到了该请求对应的虚拟节点了：根据请求对应的hash指令的第一个参数值，计算请求的hash值。
+ * 寻找第一个哈希值大于等于请求的hash值的虚拟节点，即“顺时针方向最近”的一个虚拟节点。
+ * 
+ * 
+ * 在peer.get中，需查找此虚拟节点对应的真实节点。根据虚拟节点的server成员，在真实节点数组中查找server成员一样的且可用的真实节点。
+ * 
+ * 如果找不到，那么沿着顺时针方向，继续查找下一个虚拟节点对应的真实节点。如果找到一个真实节点，那么就是它了。
+ * 
+ * 如果找到多个真实节点，使用轮询的方法从中选取一个。
+ * 
+ */
 static ngx_int_t
 ngx_http_upstream_get_chash_peer(ngx_peer_connection_t *pc, void *data)
 {
@@ -588,10 +677,15 @@ ngx_http_upstream_get_chash_peer(ngx_peer_connection_t *pc, void *data)
     now = ngx_time();
     hcf = hp->conf;
 
-    points = hcf->points;
-    point = &points->point[0];
+    points = hcf->points;           /* 虚拟节点数组 */
+    point = &points->point[0];      /* 指向第一个虚拟节点 */
 
     for ( ;; ) {
+
+         /* 在peer.init中，已根据请求的哈希值，找到顺时针方向最近的一个虚拟节点，
+         * hash为该虚拟节点在数组中的索引。
+         * 一开始hash值肯定小于number，之后每尝试一个虚拟节点后，hash++。取模是为了防止越界访问。
+         */
         server = point[hp->hash % points->number].server;
 
         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, pc->log, 0,
@@ -602,10 +696,14 @@ ngx_http_upstream_get_chash_peer(ngx_peer_connection_t *pc, void *data)
         best_i = 0;
         total = 0;
 
+        /* 遍历真实节点数组，寻找可用的、该虚拟节点归属的真实节点(server成员相同)，
+          * 如果有多个真实节点同时符合条件，那么使用轮询来从中选取一个真实节点。
+          */
         for (peer = hp->rrp.peers->peer, i = 0;
              peer;
              peer = peer->next, i++)
         {
+            /* 检查此真实节点在状态位图中对应的位，为1时表示不可用 */
             n = i / (8 * sizeof(uintptr_t));
             m = (uintptr_t) 1 << i % (8 * sizeof(uintptr_t));
 
@@ -613,10 +711,12 @@ ngx_http_upstream_get_chash_peer(ngx_peer_connection_t *pc, void *data)
                 continue;
             }
 
+            /* server指令中携带了down属性，表示后端永久不可用 */
             if (peer->down) {
                 continue;
             }
 
+            /* 在一段时间内，如果此真实节点的失败次数，超过了允许的最大值，那么不允许使用了 */
             if (peer->max_fails
                 && peer->fails >= peer->max_fails
                 && now - peer->checked <= peer->fail_timeout)
@@ -628,6 +728,7 @@ ngx_http_upstream_get_chash_peer(ngx_peer_connection_t *pc, void *data)
                 continue;
             }
 
+            /* 如果真实节点的server成员和虚拟节点的不同，表示虚拟节点不属于此真实节点 */
             if (peer->server.len != server->len
                 || ngx_strncmp(peer->server.data, server->data, server->len)
                    != 0)
@@ -635,27 +736,36 @@ ngx_http_upstream_get_chash_peer(ngx_peer_connection_t *pc, void *data)
                 continue;
             }
 
-            peer->current_weight += peer->effective_weight;
-            total += peer->effective_weight;
+            peer->current_weight += peer->effective_weight;     /* 对每个真实节点，增加其当前权重 */
+            total += peer->effective_weight;                    /* 累加所有真实节点的有效权重 */
 
+            /* 如果之前此真实节点发生了失败，会减小其effective_weight来降低它的权重。          
+             * 此后又通过增加其effective_weight来恢复它的权重。          
+             */ 
             if (peer->effective_weight < peer->weight) {
                 peer->effective_weight++;
             }
 
+            /* 选取当前权重最大者，作为本次选定的真实节点 */
             if (best == NULL || peer->current_weight > best->current_weight) {
                 best = peer;
                 best_i = i;
             }
         }
 
+        /* 如果选定了一个真实节点 */
         if (best) {
+            /* 如果使用了轮询，需要降低选定节点的当前权重 */
             best->current_weight -= total;
             goto found;
         }
 
+        /* 增加虚拟节点的索引，即“沿着顺时针方向” */
         hp->hash++;
+        /* 已经尝试的虚拟节点数 */
         hp->tries++;
 
+        /* 如果把所有的虚拟节点都尝试了一遍，还找不到可用的真实节点 */
         if (hp->tries > 20) {
             ngx_http_upstream_rr_peers_unlock(hp->rrp.peers);
             return hp->get_rr_peer(pc, &hp->rrp);
@@ -664,15 +774,18 @@ ngx_http_upstream_get_chash_peer(ngx_peer_connection_t *pc, void *data)
 
 found:
 
-    hp->rrp.current = best;
+    /* 找到了和虚拟节点相对应的、可用的真实节点了 */
+    hp->rrp.current = best;     /* 选定的真实节点 */
     ngx_http_upstream_rr_peer_ref(hp->rrp.peers, best);
 
+    /* 保存选定的后端服务器的地址，之后会向这个地址发起连接 */
     pc->sockaddr = best->sockaddr;
     pc->socklen = best->socklen;
     pc->name = &best->name;
 
     best->conns++;
 
+    /* 更新checked时间 */
     if (now - best->checked > best->fail_timeout) {
         best->checked = now;
     }
@@ -682,12 +795,16 @@ found:
     n = best_i / (8 * sizeof(uintptr_t));
     m = (uintptr_t) 1 << best_i % (8 * sizeof(uintptr_t));
 
+    /* 对于本次请求，如果之后需要再次选取真实节点，不能再选取同一个了 */
     hp->rrp.tried[n] |= m;
 
     return NGX_OK;
 }
 
 
+/**
+ * 创建srv级别配置结构体
+ */
 static void *
 ngx_http_upstream_hash_create_conf(ngx_conf_t *cf)
 {
@@ -704,6 +821,12 @@ ngx_http_upstream_hash_create_conf(ngx_conf_t *cf)
 }
 
 
+/**
+ * hash指令解析函数
+ * 
+ * 如果hash指令，只带一个参数，则使用的负载均衡算法为哈希算法，比如：hash $host$uri;
+ * 如果有hash指令，带了两个参数，且第二个参数为consistent，则使用的负载均衡算法为一致性哈希算法，比如： hash $host$uri consistent;
+ */
 static char *
 ngx_http_upstream_hash(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -721,10 +844,14 @@ ngx_http_upstream_hash(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ccv.value = &value[1];
     ccv.complex_value = &hcf->key;
 
+    /* 把hash指令的第一个参数，关联到一个ngx_http_complex_value_t变量，
+     * 之后可以通过该变量获取参数的实时值。
+     */
     if (ngx_http_compile_complex_value(&ccv) != NGX_OK) {
         return NGX_CONF_ERROR;
     }
 
+    /* 获取所在的upstream{}块 */
     uscf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_upstream_module);
 
     if (uscf->peer.init_upstream) {
@@ -732,6 +859,7 @@ ngx_http_upstream_hash(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
                            "load balancing method redefined");
     }
 
+    /* 指定此upstream块中server指令支持的属性 */
     uscf->flags = NGX_HTTP_UPSTREAM_CREATE
                   |NGX_HTTP_UPSTREAM_MODIFY
                   |NGX_HTTP_UPSTREAM_WEIGHT
@@ -740,6 +868,9 @@ ngx_http_upstream_hash(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
                   |NGX_HTTP_UPSTREAM_FAIL_TIMEOUT
                   |NGX_HTTP_UPSTREAM_DOWN;
 
+     /* 根据hash指令携带的参数来判断是使用哈希算法，还是一致性哈希算法。
+     * 每种算法都有自己的upstream块初始化函数。
+      */
     if (cf->args->nelts == 2) {
         uscf->peer.init_upstream = ngx_http_upstream_init_hash;
 
