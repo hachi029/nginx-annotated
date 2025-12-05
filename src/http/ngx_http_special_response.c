@@ -412,6 +412,10 @@ static ngx_str_t ngx_http_error_pages[] = {
 };
 
 
+/**
+ * 负责根据rc参数构造完整的HTTP响应包
+ * 如http模块只是返回了状态码 404 .., 需要让HTTP框架独立构造响应包
+ */
 ngx_int_t
 ngx_http_special_response_handler(ngx_http_request_t *r, ngx_int_t error)
 {
@@ -564,6 +568,9 @@ ngx_http_filter_finalize_request(ngx_http_request_t *r, ngx_module_t *m,
 }
 
 
+/**
+ * 清空所有响应头
+ */
 void
 ngx_http_clean_header(ngx_http_request_t *r)
 {
@@ -784,6 +791,10 @@ ngx_http_send_special_response(ngx_http_request_t *r,
 }
 
 
+/**
+ * 发送响应头、响应体
+ * 响应体 为 "<html><head><meta http-equiv="Refresh" content="0; URL=xxx"></head><body></body></html>;
+ */
 static ngx_int_t
 ngx_http_send_refresh(ngx_http_request_t *r)
 {
@@ -794,24 +805,30 @@ ngx_http_send_refresh(ngx_http_request_t *r)
     ngx_buf_t    *b;
     ngx_chain_t   out;
 
+    //获取Location 响应头
     len = r->headers_out.location->value.len;
     location = r->headers_out.location->value.data;
 
     escape = 2 * ngx_escape_uri(NULL, location, len, NGX_ESCAPE_REFRESH);
 
+    //计算响应体
     size = sizeof(ngx_http_msie_refresh_head) - 1
            + escape + len
            + sizeof(ngx_http_msie_refresh_tail) - 1;
 
+    //200
     r->err_status = NGX_HTTP_OK;
 
+    //设置 content_type 响应头
     r->headers_out.content_type_len = sizeof("text/html") - 1;
     ngx_str_set(&r->headers_out.content_type, "text/html");
     r->headers_out.content_type_lowcase = NULL;
 
+    //清空location响应头
     r->headers_out.location->hash = 0;
     r->headers_out.location = NULL;
 
+    //设置 content_length
     r->headers_out.content_length_n = size;
 
     if (r->headers_out.content_length) {
@@ -819,24 +836,29 @@ ngx_http_send_refresh(ngx_http_request_t *r)
         r->headers_out.content_length = NULL;
     }
 
+    //清空相关请求头
     ngx_http_clear_accept_ranges(r);
     ngx_http_clear_last_modified(r);
     ngx_http_clear_etag(r);
 
+    //发送响应头
     rc = ngx_http_send_header(r);
 
     if (rc == NGX_ERROR || r->header_only) {
         return rc;
     }
 
+    //创建响应体buf
     b = ngx_create_temp_buf(r->pool, size);
     if (b == NULL) {
         return NGX_ERROR;
     }
 
+    // copy "<html><head><meta http-equiv=\"Refresh\" content=\"0; URL=";
     p = ngx_cpymem(b->pos, ngx_http_msie_refresh_head,
                    sizeof(ngx_http_msie_refresh_head) - 1);
 
+    //进行url编码
     if (escape == 0) {
         p = ngx_cpymem(p, location, len);
 
@@ -844,12 +866,15 @@ ngx_http_send_refresh(ngx_http_request_t *r)
         p = (u_char *) ngx_escape_uri(p, location, len, NGX_ESCAPE_REFRESH);
     }
 
+    //"\"></head><body></body></html>" CRLF;
     b->last = ngx_cpymem(p, ngx_http_msie_refresh_tail,
                          sizeof(ngx_http_msie_refresh_tail) - 1);
 
+    //
     b->last_buf = (r == r->main) ? 1 : 0;
     b->last_in_chain = 1;
 
+    //发送响应体
     out.buf = b;
     out.next = NULL;
 

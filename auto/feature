@@ -2,6 +2,10 @@
 # Copyright (C) Igor Sysoev
 # Copyright (C) Nginx, Inc.
 
+#nginx的configure会自动检测不同平台的特性，就是auto/feature的实现. 
+# 此工具的核心思想是，输出一小段代表性c程序，然后设置好编译选项，再进行编译连接运行，再对结果进行分析。
+# 例如，如果想检测某个库是否存在，就在小段c程序里面调用库里面的某个函数，再进行编译链接，如果出错，则表示库的环境不正常，
+#    如果编译成功，且运行正常，则库的环境检测正常。我们在写nginx第三方模块时，也常使用此工具来进行环境的检测，所以，此工具的作用贯穿整个configure过程。
 
 echo $ngx_n "checking for $ngx_feature ...$ngx_c"
 
@@ -12,19 +16,26 @@ checking for $ngx_feature
 
 END
 
+# 初始化输出结果为no
 ngx_found=no
 
+#将特性名称小写转换成大写
 if test -n "$ngx_feature_name"; then
+    # 小写转大写
     ngx_have_feature=`echo $ngx_feature_name \
                    | tr abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ`
 fi
 
+# 将所有include目录转换成编译选项
 if test -n "$ngx_feature_path"; then
     for ngx_temp in $ngx_feature_path; do
         ngx_feature_inc_path="$ngx_feature_inc_path -I $ngx_temp"
     done
 fi
 
+# 生成临时的小段c程序代码。
+# $ngx_feature_incs变量是程序需要include的头文件
+# $ngx_feature_test是测试代码
 cat << END > $NGX_AUTOTEST.c
 
 #include <sys/types.h>
@@ -39,24 +50,33 @@ int main(void) {
 END
 
 
+# 编译命令
+# 编译之后的目标文件是 $NGX_AUTOTEST，后面会判断这个文件是否存在来判断是否编译成功
 ngx_test="$CC $CC_TEST_FLAGS $CC_AUX_FLAGS $ngx_feature_inc_path \
           -o $NGX_AUTOTEST $NGX_AUTOTEST.c $NGX_TEST_LD_OPT $ngx_feature_libs"
 
 ngx_feature_inc_path=
 
+# 执行编译过程
+# 编译成功后，会生成$NGX_AUTOTEST命名的文件
 eval "/bin/sh -c \"$ngx_test\" >> $NGX_AUTOCONF_ERR 2>&1"
 
 
+# 如果文件存在，则编译成功
 if [ -x $NGX_AUTOTEST ]; then
 
     case "$ngx_feature_run" in
 
+        # 需要运行来判断是否支持特性
+        # 测试程序能否正常执行（即程序退出后的状态码是否是0），如果正常退出，则特性测试成功，设置ngx_found为yes，并添加名为ngx_feature_name的宏定义，宏的值为1
         yes)
+            # 如果程序正常退出，退出码为0，则程序执行成功，我们可以在测试代码里面手动返回非0来表示程序出错
             # /bin/sh is used to intercept "Killed" or "Abort trap" messages
             if /bin/sh -c $NGX_AUTOTEST >> $NGX_AUTOCONF_ERR 2>&1; then
                 echo " found"
                 ngx_found=yes
 
+                # 添加宏定义，宏的值为1
                 if test -n "$ngx_feature_name"; then
                     have=$ngx_have_feature . auto/have
                 fi
@@ -66,12 +86,15 @@ if [ -x $NGX_AUTOTEST ]; then
             fi
         ;;
 
+        # 需要运行程序来判断是否支持特性，如果支持，将程序标准输出的结果作为宏的值
         value)
             # /bin/sh is used to intercept "Killed" or "Abort trap" messages
             if /bin/sh -c $NGX_AUTOTEST >> $NGX_AUTOCONF_ERR 2>&1; then
                 echo " found"
                 ngx_found=yes
 
+                # 与yes不一样的是，value会将程序从标准输出里面打印出来的值，设置为ngx_feature_name宏变量的值
+                # 在此种情况下，程序需要设置ngx_feature_name变量名
                 cat << END >> $NGX_AUTO_CONFIG_H
 
 #ifndef $ngx_feature_name
@@ -84,6 +107,7 @@ END
             fi
         ;;
 
+        # 与yes正好相反
         bug)
             # /bin/sh is used to intercept "Killed" or "Abort trap" messages
             if /bin/sh -c $NGX_AUTOTEST >> $NGX_AUTOCONF_ERR 2>&1; then
@@ -100,6 +124,7 @@ END
         ;;
 
         *)
+             # 不需要运行程序，最后定义宏变量
             echo " found"
             ngx_found=yes
 
@@ -111,13 +136,18 @@ END
     esac
 
 else
+    # 编译失败
     echo " not found"
 
+    # 编译失败，会保存信息到日志文件中
     echo "----------"    >> $NGX_AUTOCONF_ERR
+    # 保留编译文件的内容
     cat $NGX_AUTOTEST.c  >> $NGX_AUTOCONF_ERR
     echo "----------"    >> $NGX_AUTOCONF_ERR
+    # 保留编译文件的选项
     echo $ngx_test       >> $NGX_AUTOCONF_ERR
     echo "----------"    >> $NGX_AUTOCONF_ERR
 fi
 
+# 最后删除生成的临时文件
 rm -rf $NGX_AUTOTEST*

@@ -56,6 +56,7 @@ typedef struct {
     ngx_flag_t                  override_charset;
 
     ngx_hash_t                  types;
+    //charset_types 配置指令
     ngx_array_t                *types_keys;
 } ngx_http_charset_loc_conf_t;
 
@@ -180,6 +181,7 @@ static ngx_command_t  ngx_http_charset_filter_commands[] = {
 
 static ngx_http_module_t  ngx_http_charset_filter_module_ctx = {
     NULL,                                  /* preconfiguration */
+    //安装filter: header_filter和body_filter
     ngx_http_charset_postconfiguration,    /* postconfiguration */
 
     ngx_http_charset_create_main_conf,     /* create main configuration */
@@ -193,6 +195,16 @@ static ngx_http_module_t  ngx_http_charset_filter_module_ctx = {
 };
 
 
+/**
+ * https://nginx.org/en/docs/http/ngx_http_charset_module.html
+ * 
+ * 响应头Content-Type里添加charset。也可以做编码转换
+ * 
+ * header_filter和body_filter
+ * 
+ * 默认关闭，可以添加charset，也可以将内容从一种字符集转换到另外一种字符集，不支持多字节字符集。
+ * 
+ */
 ngx_module_t  ngx_http_charset_filter_module = {
     NGX_MODULE_V1,
     &ngx_http_charset_filter_module_ctx,   /* module context */
@@ -213,6 +225,9 @@ static ngx_http_output_header_filter_pt  ngx_http_next_header_filter;
 static ngx_http_output_body_filter_pt    ngx_http_next_body_filter;
 
 
+/**
+ * 本模块的header_filter
+ */
 static ngx_int_t
 ngx_http_charset_header_filter(ngx_http_request_t *r)
 {
@@ -543,6 +558,9 @@ ngx_http_charset_ctx(ngx_http_request_t *r, ngx_http_charset_t *charsets,
 }
 
 
+/**
+ * 本模块的body_filter
+ */
 static ngx_int_t
 ngx_http_charset_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {

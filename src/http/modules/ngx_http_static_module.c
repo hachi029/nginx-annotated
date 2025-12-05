@@ -16,6 +16,7 @@ static ngx_int_t ngx_http_static_init(ngx_conf_t *cf);
 
 static ngx_http_module_t  ngx_http_static_module_ctx = {
     NULL,                                  /* preconfiguration */
+    //安装content_handler
     ngx_http_static_init,                  /* postconfiguration */
 
     NULL,                                  /* create main configuration */
@@ -29,6 +30,16 @@ static ngx_http_module_t  ngx_http_static_module_ctx = {
 };
 
 
+/**
+ * 是一个content_handler, 没有配置指令
+ * 
+ * 如果一个request对应的location并没有直接有配置的content handler，那么nginx依次尝试:
+ *   1.如果一个location里面有配置 random_index on，那么随机选择一个文件，发送给客户端。
+ *   2.如果一个location里面有配置 index指令，那么发送index指令指明的文件，给客户端。
+ *   3.如果一个location里面有配置 autoindex on，那么就发送请求地址对应的服务端路径下的文件列表给客户端。
+ *   4.如果这个request对应的location上有设置gzip_static on，那么就查找是否有对应的.gz文件存在，有的话，就发送这个给客户端（客户端支持gzip的情况下）。
+ *   5.请求的URI如果对应一个静态文件，static module就发送静态文件的内容到客户端。
+ */
 ngx_module_t  ngx_http_static_module = {
     NGX_MODULE_V1,
     &ngx_http_static_module_ctx,           /* module context */
@@ -45,6 +56,9 @@ ngx_module_t  ngx_http_static_module = {
 };
 
 
+/**
+ * 本模块的content_handler
+ */
 static ngx_int_t
 ngx_http_static_handler(ngx_http_request_t *r)
 {
@@ -60,10 +74,14 @@ ngx_http_static_handler(ngx_http_request_t *r)
     ngx_open_file_info_t       of;
     ngx_http_core_loc_conf_t  *clcf;
 
+    //只允许 GET/HEAD/POST方法
     if (!(r->method & (NGX_HTTP_GET|NGX_HTTP_HEAD|NGX_HTTP_POST))) {
         return NGX_HTTP_NOT_ALLOWED;
     }
 
+    //url结尾如果是/, 说明请求的不是一个文件, 则不处理。
+    //给后续的handler去处理，比如后续的ngx_http_autoindex_handler（如果是请求的是一个目录下面，可以列出这个目录的文件），
+    //或者是ngx_http_index_handler（如果请求的路径下面有个默认的index文件，直接返回index文件的内容）
     if (r->uri.data[r->uri.len - 1] == '/') {
         return NGX_DECLINED;
     }
@@ -75,6 +93,7 @@ ngx_http_static_handler(ngx_http_request_t *r)
      * so we do not need to reserve memory for '/' for possible redirect
      */
 
+    //将请求的uri转换为文件路径, last指向最后一个字符的下一个位置
     last = ngx_http_map_uri_to_path(r, &path, &root, 0);
     if (last == NULL) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
@@ -87,19 +106,23 @@ ngx_http_static_handler(ngx_http_request_t *r)
 
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
 
+    //创建ngx_open_file_info_t对象
     ngx_memzero(&of, sizeof(ngx_open_file_info_t));
 
-    of.read_ahead = clcf->read_ahead;
-    of.directio = clcf->directio;
+    of.read_ahead = clcf->read_ahead;  //内核系统调用参数
+    of.directio = clcf->directio;       //
     of.valid = clcf->open_file_cache_valid;
     of.min_uses = clcf->open_file_cache_min_uses;
     of.errors = clcf->open_file_cache_errors;
     of.events = clcf->open_file_cache_events;
 
+    //设置of的disable_symlinks字段
     if (ngx_http_set_disable_symlinks(r, clcf, &path, &of) != NGX_OK) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
+    
+    //从打开文件缓存中获取文件信息
     if (ngx_open_cached_file(clcf->open_file_cache, &path, &of, r->pool)
         != NGX_OK)
     {
@@ -113,7 +136,7 @@ ngx_http_static_handler(ngx_http_request_t *r)
         case NGX_ENAMETOOLONG:
 
             level = NGX_LOG_ERR;
-            rc = NGX_HTTP_NOT_FOUND;
+            rc = NGX_HTTP_NOT_FOUND;        //404
             break;
 
         case NGX_EACCES:
@@ -123,7 +146,7 @@ ngx_http_static_handler(ngx_http_request_t *r)
 #endif
 
             level = NGX_LOG_ERR;
-            rc = NGX_HTTP_FORBIDDEN;
+            rc = NGX_HTTP_FORBIDDEN;        //403
             break;
 
         default:
@@ -145,11 +168,11 @@ ngx_http_static_handler(ngx_http_request_t *r)
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, log, 0, "http static fd: %d", of.fd);
 
-    if (of.is_dir) {
+    if (of.is_dir) {    //如果请求的文件是目录，执行301重定向
 
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, log, 0, "http dir");
 
-        ngx_http_clear_location(r);
+        ngx_http_clear_location(r);     //清理响应头location
 
         r->headers_out.location = ngx_list_push(&r->headers_out.headers);
         if (r->headers_out.location == NULL) {
@@ -171,7 +194,8 @@ ngx_http_static_handler(ngx_http_request_t *r)
             if (r->args.len) {
                 len += r->args.len + 1;
             }
-
+            
+            //分配location内存,并赋值
             location = ngx_pnalloc(r->pool, len);
             if (location == NULL) {
                 ngx_http_clear_location(r);
@@ -214,57 +238,66 @@ ngx_http_static_handler(ngx_http_request_t *r)
 
 #endif
 
+    //不允许POST方法
     if (r->method == NGX_HTTP_POST) {
         return NGX_HTTP_NOT_ALLOWED;
     }
 
-    rc = ngx_http_discard_request_body(r);
+    rc = ngx_http_discard_request_body(r);  //丢弃请求体
 
+    //NGX_OK表示请求体已经丢弃完毕
     if (rc != NGX_OK) {
         return rc;
     }
-
+    
+    
     log->action = "sending response to client";
 
-    r->headers_out.status = NGX_HTTP_OK;
-    r->headers_out.content_length_n = of.size;
-    r->headers_out.last_modified_time = of.mtime;
+    r->headers_out.status = NGX_HTTP_OK;            //响应状态码200
+    r->headers_out.content_length_n = of.size;      //内容长度
+    r->headers_out.last_modified_time = of.mtime;   //最后修改时间
 
+    //设置Etag响应头
     if (ngx_http_set_etag(r) != NGX_OK) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
+    //设置Content_type响应头
     if (ngx_http_set_content_type(r) != NGX_OK) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
+    //允许range协议
     r->allow_ranges = 1;
 
     /* we need to allocate all before the header would be sent */
 
+    //先申请内存空间，再发送响应头。避免发送了200的响应头，但是却因为内存不够导致响应失败
     b = ngx_calloc_buf(r->pool);
     if (b == NULL) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
+    //设置file结构体
     b->file = ngx_pcalloc(r->pool, sizeof(ngx_file_t));
     if (b->file == NULL) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
+    //发送响应头
     rc = ngx_http_send_header(r);
 
     if (rc == NGX_ERROR || rc > NGX_OK || r->header_only) {
         return rc;
     }
 
-    b->file_pos = 0;
+    b->file_pos = 0;        // start=0, end=of.size
     b->file_last = of.size;
 
-    b->in_file = b->file_last ? 1 : 0;
-    b->last_buf = (r == r->main) ? 1 : 0;
-    b->last_in_chain = 1;
-    b->sync = (b->last_buf || b->in_file) ? 0 : 1;
+    b->in_file = b->file_last ? 1 : 0;      //如果文件大小不为0，设置为1
+    b->last_buf = (r == r->main) ? 1 : 0;   //如果是主请求，设置为1
+    b->last_in_chain = 1;                   //设置为1，表示是链表中的最后一个buf
+    b->sync = (b->last_buf || b->in_file) ? 0 : 1;  //如果是最后一个buf，或者是文件buf，设置为0
 
     b->file->fd = of.fd;
     b->file->name = path;
@@ -274,7 +307,7 @@ ngx_http_static_handler(ngx_http_request_t *r)
     out.buf = b;
     out.next = NULL;
 
-    return ngx_http_output_filter(r, &out);
+    return ngx_http_output_filter(r, &out);     //发送响应
 }
 
 

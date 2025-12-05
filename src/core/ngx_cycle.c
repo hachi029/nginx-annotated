@@ -25,8 +25,11 @@ static ngx_pool_t     *ngx_temp_pool;
 static ngx_event_t     ngx_cleaner_event;
 static ngx_event_t     ngx_shutdown_event;
 
+//nginx -t或 -T参数 标识
 ngx_uint_t             ngx_test_config;
+//nginx -T参数 标识
 ngx_uint_t             ngx_dump_config;
+//nginx -q参数 标识, 该参数用于在启动时不输出任何日志信息，除非发生错误
 ngx_uint_t             ngx_quiet_mode;
 
 
@@ -35,6 +38,30 @@ static ngx_connection_t  dumb;
 /* STUB */
 
 
+/**
+ * 创建并初始化全局变量ngx_cycle
+ * 
+ *  1.更新时区与时间；
+ *  2.创建内存池；
+ *  3.分配 ngx_cycle_t 结构体内存，创建该结构的变量 cycle 并初始化；
+ *  4.遍历所有 core模块，并调用该模块的 create_conf() 函数；
+ *  5.配置文件解析；
+ *  6.遍历所有core模块，并调用core模块的init_conf()函数；
+ *  7.遍历 open_files 链表中的每一个文件并打开；
+ *  8.创建新的共享内存并初始化；
+ *  9.遍历 listening 数组并打开所有侦听；
+ *  10.提交新的 cycle 配置，并调用所有模块的init_module；
+ *  11.关闭或删除不被使用的在 old_cycle 中的资源：
+ *  12.释放多余的共享内存；
+ *  13.关闭多余的侦听 sockets；
+ *  14.关闭多余的打开文件；
+ * 
+ * old_cycle临时的结构体，一般仅用来传递配置文件路径等参数
+ * 
+ * 该函数将上一个之前的cycle做为参数，该函数载入上一个cycle使用的配置文件，尽可能多的继承资源，nginx启动会创建一个“init_cycle”的cycle，
+ * 其做为old_cycle,然后被配置构建的实际cycle取代
+ * 
+ */
 ngx_cycle_t *
 ngx_init_cycle(ngx_cycle_t *old_cycle)
 {
@@ -54,6 +81,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
     ngx_core_module_t   *module;
     char                 hostname[NGX_MAXHOSTNAMELEN];
 
+    /* 更新时区 */
     ngx_timezone_update();
 
     /* force localtime update with a new timezone */
@@ -61,27 +89,37 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
     tp = ngx_timeofday();
     tp->sec = 0;
 
+    /* 更新时间 */
     ngx_time_update();
 
 
+    /**
+     * nginx启动可能出错，出错就要记录到错误日志中。而错误日志本身也是配置的一部分，所以不解析完配置，nginx就不能了解错误日志的信息。
+     * nginx通过使用上一个周期的错误日志来记录解析配置时发生的错误，而在配置解析完成以后，nginx就用新的错误日志替换旧的错误日志。
+     * 具体代码摘抄如下，以说明nginx解析配置时使用old_cycle的错误日志：
+     */
     log = old_cycle->log;
 
+    //创建一块内存默认16k,后续所有的内存都会被分配到这个内存池上面
     pool = ngx_create_pool(NGX_CYCLE_POOL_SIZE, log);
     if (pool == NULL) {
         return NULL;
     }
     pool->log = log;
 
+    //创建ngx_cycle_t实例
     cycle = ngx_pcalloc(pool, sizeof(ngx_cycle_t));
     if (cycle == NULL) {
         ngx_destroy_pool(pool);
         return NULL;
     }
 
+    //初始化相关配置参数
     cycle->pool = pool;
     cycle->log = log;
     cycle->old_cycle = old_cycle;
 
+    //配置路径前缀
     cycle->conf_prefix.len = old_cycle->conf_prefix.len;
     cycle->conf_prefix.data = ngx_pstrdup(pool, &old_cycle->conf_prefix);
     if (cycle->conf_prefix.data == NULL) {
@@ -89,6 +127,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
         return NULL;
     }
 
+    /* Nginx路径拷贝 */
     cycle->prefix.len = old_cycle->prefix.len;
     cycle->prefix.data = ngx_pstrdup(pool, &old_cycle->prefix);
     if (cycle->prefix.data == NULL) {
@@ -96,6 +135,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
         return NULL;
     }
 
+    //error_log路径拷贝
     cycle->error_log.len = old_cycle->error_log.len;
     cycle->error_log.data = ngx_pnalloc(pool, old_cycle->error_log.len + 1);
     if (cycle->error_log.data == NULL) {
@@ -105,6 +145,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
     ngx_cpystrn(cycle->error_log.data, old_cycle->error_log.data,
                 old_cycle->error_log.len + 1);
 
+    //配置文件路径拷贝            
     cycle->conf_file.len = old_cycle->conf_file.len;
     cycle->conf_file.data = ngx_pnalloc(pool, old_cycle->conf_file.len + 1);
     if (cycle->conf_file.data == NULL) {
@@ -114,6 +155,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
     ngx_cpystrn(cycle->conf_file.data, old_cycle->conf_file.data,
                 old_cycle->conf_file.len + 1);
 
+    /* 配置参数 信息拷贝 如 -g */
     cycle->conf_param.len = old_cycle->conf_param.len;
     cycle->conf_param.data = ngx_pstrdup(pool, &old_cycle->conf_param);
     if (cycle->conf_param.data == NULL) {
@@ -124,6 +166,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
 
     n = old_cycle->paths.nelts ? old_cycle->paths.nelts : 10;
 
+    //路径信息初始化
     if (ngx_array_init(&cycle->paths, pool, n, sizeof(ngx_path_t *))
         != NGX_OK)
     {
@@ -134,6 +177,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
     ngx_memzero(cycle->paths.elts, n * sizeof(ngx_path_t *));
 
 
+    //初始化config_dump动态数组
     if (ngx_array_init(&cycle->config_dump, pool, 1, sizeof(ngx_conf_dump_t))
         != NGX_OK)
     {
@@ -144,6 +188,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
     ngx_rbtree_init(&cycle->config_dump_rbtree, &cycle->config_dump_sentinel,
                     ngx_str_rbtree_insert_value);
 
+    //初始化打开的文件句柄 链表 old_cycle->open_files       
     if (old_cycle->open_files.part.nelts) {
         n = old_cycle->open_files.part.nelts;
         for (part = old_cycle->open_files.part.next; part; part = part->next) {
@@ -154,6 +199,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
         n = 20;
     }
 
+    //初始化open_files链表
     if (ngx_list_init(&cycle->open_files, pool, n, sizeof(ngx_open_file_t))
         != NGX_OK)
     {
@@ -162,6 +208,9 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
     }
 
 
+    /* 初始化shared_memory链表 */
+    //nginx根据以往的经验（old_cycle）预测这一次的配置需要分配多少内存
+    //遍历old_cycle，统计上一次系统中分配了多少块共享内存，接着就按这个数据初始化当前cycle中共享内存的规模
     if (old_cycle->shared_memory.part.nelts) {
         n = old_cycle->shared_memory.part.nelts;
         for (part = old_cycle->shared_memory.part.next; part; part = part->next)
@@ -173,6 +222,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
         n = 1;
     }
 
+    //初始化shared_memory链表
     if (ngx_list_init(&cycle->shared_memory, pool, n, sizeof(ngx_shm_zone_t))
         != NGX_OK)
     {
@@ -180,6 +230,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
         return NULL;
     }
 
+    /* 初始化listening */
     n = old_cycle->listening.nelts ? old_cycle->listening.nelts : 10;
 
     if (ngx_array_init(&cycle->listening, pool, n, sizeof(ngx_listening_t))
@@ -195,6 +246,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
     ngx_queue_init(&cycle->reusable_connections_queue);
 
 
+    //创建conf_ctx数组，数组个数为 ngx_max_module. 用于 存放解析配置的上下文信息
     cycle->conf_ctx = ngx_pcalloc(pool, ngx_max_module * sizeof(void *));
     if (cycle->conf_ctx == NULL) {
         ngx_destroy_pool(pool);
@@ -202,6 +254,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
     }
 
 
+    //获取主机名， 最长256字符
     if (gethostname(hostname, NGX_MAXHOSTNAMELEN) == -1) {
         ngx_log_error(NGX_LOG_EMERG, log, ngx_errno, "gethostname() failed");
         ngx_destroy_pool(pool);
@@ -219,28 +272,34 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
         return NULL;
     }
 
+    //将主机名转换为小写
     ngx_strlow(cycle->hostname.data, (u_char *) hostname, cycle->hostname.len);
 
 
+    /* 创建模块以及创建模块的配置信息: 创建cycle->modules，将 ngx_modules拷贝进去 */
     if (ngx_cycle_modules(cycle) != NGX_OK) {
         ngx_destroy_pool(pool);
         return NULL;
     }
 
 
+    //每个模块都必须有相应的数据结构来存储配置文件中的各配置项，创建这些数据结构的工作都需要在这一步进行
     for (i = 0; cycle->modules[i]; i++) {
+        //只关心NGX_CORE_MODULE核心模块，这也是为了降低框架的复杂度. CORE模块数量较少，因此cycle->conf_ctx数组几乎是空的
         if (cycle->modules[i]->type != NGX_CORE_MODULE) {
             continue;
         }
 
         module = cycle->modules[i]->ctx;
 
+        //调用所有核心模块的create_conf方法,创建模块的配置结构体
         if (module->create_conf) {
             rv = module->create_conf(cycle);
             if (rv == NULL) {
                 ngx_destroy_pool(pool);
                 return NULL;
             }
+            //按模块的index放入cycle->conf_ctx的配置结构体数组中
             cycle->conf_ctx[cycle->modules[i]->index] = rv;
         }
     }
@@ -249,6 +308,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
     senv = environ;
 
 
+     /* 解析配置文件 */
     ngx_memzero(&conf, sizeof(ngx_conf_t));
     /* STUB: init array ? */
     conf.args = ngx_array_create(pool, 10, sizeof(ngx_str_t));
@@ -257,6 +317,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
         return NULL;
     }
 
+    /* 创建一个临时的内存池，后面会清空掉; conf也主要用于解析配置文件的临时变量 */
     conf.temp_pool = ngx_create_pool(NGX_CYCLE_POOL_SIZE, log);
     if (conf.temp_pool == NULL) {
         ngx_destroy_pool(pool);
@@ -268,19 +329,25 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
     conf.cycle = cycle;
     conf.pool = pool;
     conf.log = log;
-    conf.module_type = NGX_CORE_MODULE;
-    conf.cmd_type = NGX_MAIN_CONF;
+    conf.module_type = NGX_CORE_MODULE;     /* 配置文件模块类型 */
+    conf.cmd_type = NGX_MAIN_CONF;          /* 命令集类型 */
 
 #if 0
     log->log_level = NGX_LOG_DEBUG_ALL;
 #endif
 
+    //主要解析命令行中的核心模块配置参数，如-g "deamon off;"
     if (ngx_conf_param(&conf) != NGX_CONF_OK) {
         environ = senv;
         ngx_destroy_cycle_pools(&conf);
         return NULL;
     }
 
+    /* 解析配置文件/usr/local/nginx/conf/nginx.conf 信息 */
+    
+    //调用配置模块提供的解析配置项方法。
+    //对于任一个配置项，将会检查所有核心模块以找出对它感兴趣的模块，
+    //并调用该模块在ngx_command_t 结构体中定义的配置项处理方法
     if (ngx_conf_parse(&conf, &cycle->conf_file) != NGX_CONF_OK) {
         environ = senv;
         ngx_destroy_cycle_pools(&conf);
@@ -292,6 +359,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
                        cycle->conf_file.data);
     }
 
+    //调用所有NGX_CORE_MODULE核心模块的init_conf方法
     for (i = 0; cycle->modules[i]; i++) {
         if (cycle->modules[i]->type != NGX_CORE_MODULE) {
             continue;
@@ -300,6 +368,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
         module = cycle->modules[i]->ctx;
 
         if (module->init_conf) {
+            //解析完nginx.conf文件后，调用核心模块的init_conf方法，初始化核心模块
             if (module->init_conf(cycle,
                                   cycle->conf_ctx[cycle->modules[i]->index])
                 == NGX_CONF_ERROR)
@@ -317,6 +386,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
 
     ccf = (ngx_core_conf_t *) ngx_get_conf(cycle->conf_ctx, ngx_core_module);
 
+    // -t 测试配置
     if (ngx_test_config) {
 
         if (ngx_create_pidfile(&ccf->pid, log) != NGX_OK) {
@@ -351,20 +421,30 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
     }
 
 
+     /* 初始化 cycle->paths 数组 */
     if (ngx_create_paths(cycle, ccf->user) != NGX_OK) {
         goto failed;
     }
 
 
+    // 打开日志，并调用ngx_conf_open_file方法，会将打开的文件放到cycle->open_files链表中 主要是日志文件和配置文件*/
     if (ngx_log_open_default(cycle) != NGX_OK) {
         goto failed;
     }
 
     /* open the new files */
 
+    /**
+     * 在之前核心模块的init_conf或者create_conf方法中，
+     * 可能已经有些模块（如缓存模 块）在ngx_cycle_t结构体中的pathes动态数组和open_files链表中添加了需要打开的文件或者目录，
+     * 本步骤将会创建不存在的目录，并把相应的文件打开。
+     * 同时，ngx_cycle_t结构体的 shared_memory链表中将会开始初始化用于进程间通信的共享内存
+     */
+
     part = &cycle->open_files.part;
     file = part->elts;
 
+     /* 遍历open_file 链表中每一个文件，并打开该文件 */
     for (i = 0; /* void */ ; i++) {
 
         if (i >= part->nelts) {
@@ -412,9 +492,11 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
 
     /* create shared memory */
 
+    /* 创建共享内存并初始化。新旧shared_memory链表的比较，相同的共享内存保留，旧的不同的共享内存被释放，新的被创建 */
     part = &cycle->shared_memory.part;
     shm_zone = part->elts;
 
+    //遍历链表 shared_memory
     for (i = 0; /* void */ ; i++) {
 
         if (i >= part->nelts) {
@@ -426,6 +508,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
             i = 0;
         }
 
+        //size检查
         if (shm_zone[i].shm.size == 0) {
             ngx_log_error(NGX_LOG_EMERG, log, 0,
                           "zero size shared memory zone \"%V\"",
@@ -440,6 +523,11 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
 
         data = NULL;
 
+         /*
+         * 新的共享内存与旧的共享内存链表进行比较，
+         * 相同则保留，不同创建新的，旧的被释放
+         */
+        //遍历old_cycle的shared_memory链表
         for (n = 0; /* void */ ; n++) {
 
             if (n >= opart->nelts) {
@@ -451,10 +539,12 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
                 n = 0;
             }
 
+            //对比名称长度
             if (shm_zone[i].shm.name.len != oshm_zone[n].shm.name.len) {
                 continue;
             }
 
+            //对比名称
             if (ngx_strncmp(shm_zone[i].shm.name.data,
                             oshm_zone[n].shm.name.data,
                             shm_zone[i].shm.name.len)
@@ -463,14 +553,17 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
                 continue;
             }
 
+            //名称相同，比较tag
             if (shm_zone[i].tag == oshm_zone[n].tag && shm_zone[i].noreuse) {
                 data = oshm_zone[n].data;
                 break;
             }
 
+            //名称相同，比较tag和size
             if (shm_zone[i].tag == oshm_zone[n].tag
                 && shm_zone[i].shm.size == oshm_zone[n].shm.size)
             {
+                //名称、tag、size都相同
                 shm_zone[i].shm.addr = oshm_zone[n].shm.addr;
 #if (NGX_WIN32)
                 shm_zone[i].shm.handle = oshm_zone[n].shm.handle;
@@ -482,12 +575,14 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
                     goto failed;
                 }
 
+                //找到了相同的共享内存
                 goto shm_zone_found;
             }
 
             break;
         }
 
+        //创建新的共享内存
         if (ngx_shm_alloc(&shm_zone[i].shm) != NGX_OK) {
             goto failed;
         }
@@ -506,6 +601,11 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
     }
 
 
+    /**
+     * 在解析配置项时，所有的模块都已经解析出自己需要监听的端口，如HTTP模块已经在解析http{...}配置项时得到它要监听的端口，
+     * 并添加到listening数组中了。
+     * 这一步骤就是按照listening数组中的每一个ngx_listening_t元素设置socket句柄并 监听端口
+     */
     /* handle the listening sockets */
 
     if (old_cycle->listening.nelts) {
@@ -621,15 +721,18 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
         }
     }
 
+    //遍历cycle->listening动态数组，针对每一个ngx_listening_t创建socket、执行bind、listen
     if (ngx_open_listening_sockets(cycle) != NGX_OK) {
         goto failed;
     }
 
     if (!ngx_test_config) {
+        //配置监听套接字选项 setsockopt，如接收发送缓冲区、keepalive选项等
         ngx_configure_listening_sockets(cycle);
     }
 
 
+    /* 提交新的cycle配置，并调用所有模块的 init_module */
     /* commit the new cycle configuration */
 
     if (!ngx_use_stderr) {
@@ -638,16 +741,21 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
 
     pool->log = cycle->log;
 
+    /**
+     * 调用所有模块的init_module方法
+     */
     if (ngx_init_modules(cycle) != NGX_OK) {
         /* fatal */
         exit(1);
     }
 
 
+     /* 关闭或删除不被使用的old_cycle 资源 */
     /* close and delete stuff that lefts from an old cycle */
 
     /* free the unnecessary shared memory */
 
+     /* 关闭或删除残留在old_cycle中的资源 释放多余的共享内存;关闭多余的侦听sockets;关闭多余的打开文件*/
     opart = &old_cycle->shared_memory.part;
     oshm_zone = opart->elts;
 
@@ -676,10 +784,12 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
                 n = 0;
             }
 
+            //名称长度比较
             if (oshm_zone[i].shm.name.len != shm_zone[n].shm.name.len) {
                 continue;
             }
 
+            //名称比较
             if (ngx_strncmp(oshm_zone[i].shm.name.data,
                             shm_zone[n].shm.name.data,
                             oshm_zone[i].shm.name.len)
@@ -688,16 +798,19 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
                 continue;
             }
 
+            //tag和大小比较
             if (oshm_zone[i].tag == shm_zone[n].tag
                 && oshm_zone[i].shm.size == shm_zone[n].shm.size
                 && !oshm_zone[i].noreuse)
             {
+                //如果tag、大小相同且noreuse为0，则不释放该共享内存
                 goto live_shm_zone;
             }
 
             break;
         }
 
+        //释放掉旧的共享内存
         ngx_shm_free(&oshm_zone[i].shm);
 
     live_shm_zone:
@@ -717,6 +830,7 @@ old_shm_zone_done:
             continue;
         }
 
+        //关闭old_cycle不再使用的监听套接字
         if (ngx_close_socket(ls[i].fd) == -1) {
             ngx_log_error(NGX_LOG_EMERG, log, ngx_socket_errno,
                           ngx_close_socket_n " listening socket on %V failed",
@@ -733,6 +847,7 @@ old_shm_zone_done:
             ngx_log_error(NGX_LOG_WARN, cycle->log, 0,
                           "deleting socket %s", name);
 
+            //只是删除unix域套接字文件
             if (ngx_delete_file(name) == NGX_FILE_ERROR) {
                 ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_socket_errno,
                               ngx_delete_file_n " %s failed", name);
@@ -763,6 +878,7 @@ old_shm_zone_done:
             continue;
         }
 
+        //关闭文件
         if (ngx_close_file(file[i].fd) == NGX_FILE_ERROR) {
             ngx_log_error(NGX_LOG_EMERG, log, ngx_errno,
                           ngx_close_file_n " \"%s\" failed",
@@ -772,6 +888,7 @@ old_shm_zone_done:
 
     ngx_destroy_pool(conf.temp_pool);
 
+    //如果nginx.conf中配置为单进程工作模式，这时将会调用ngx_single_process_cycle方法 进入单进程工作模式
     if (ngx_process == NGX_PROCESS_MASTER || ngx_is_init_cycle(old_cycle)) {
 
         ngx_destroy_pool(old_cycle->pool);
@@ -1020,6 +1137,9 @@ ngx_init_zone_pool(ngx_cycle_t *cycle, ngx_shm_zone_t *zn)
 }
 
 
+/**
+ * 创建pid文件
+ */
 ngx_int_t
 ngx_create_pidfile(ngx_str_t *name, ngx_log_t *log)
 {
@@ -1029,6 +1149,7 @@ ngx_create_pidfile(ngx_str_t *name, ngx_log_t *log)
     ngx_file_t  file;
     u_char      pid[NGX_INT64_LEN + 2];
 
+    //只有master进程或者单进程模式的进程才会创建pid文件
     if (ngx_process > NGX_PROCESS_MASTER) {
         return NGX_OK;
     }
@@ -1040,6 +1161,7 @@ ngx_create_pidfile(ngx_str_t *name, ngx_log_t *log)
 
     create = ngx_test_config ? NGX_FILE_CREATE_OR_OPEN : NGX_FILE_TRUNCATE;
 
+    //打开文件
     file.fd = ngx_open_file(file.name.data, NGX_FILE_RDWR,
                             create, NGX_FILE_DEFAULT_ACCESS);
 
@@ -1051,14 +1173,17 @@ ngx_create_pidfile(ngx_str_t *name, ngx_log_t *log)
 
     rc = NGX_OK;
 
+    //非测试模式
     if (!ngx_test_config) {
         len = ngx_snprintf(pid, NGX_INT64_LEN + 2, "%P%N", ngx_pid) - pid;
 
+        //将当前pid写入文件中
         if (ngx_write_file(&file, pid, len, 0) == NGX_ERROR) {
             rc = NGX_ERROR;
         }
     }
 
+    //关闭文件
     if (ngx_close_file(file.fd) == NGX_FILE_ERROR) {
         ngx_log_error(NGX_LOG_ALERT, log, ngx_errno,
                       ngx_close_file_n " \"%s\" failed", file.name.data);
@@ -1068,6 +1193,9 @@ ngx_create_pidfile(ngx_str_t *name, ngx_log_t *log)
 }
 
 
+/**
+ * 删除pid文件
+ */
 void
 ngx_delete_pidfile(ngx_cycle_t *cycle)
 {
@@ -1078,6 +1206,7 @@ ngx_delete_pidfile(ngx_cycle_t *cycle)
 
     name = ngx_new_binary ? ccf->oldpid.data : ccf->pid.data;
 
+    //删除pid文件
     if (ngx_delete_file(name) == NGX_FILE_ERROR) {
         ngx_log_error(NGX_LOG_ALERT, cycle->log, ngx_errno,
                       ngx_delete_file_n " \"%s\" failed", name);
@@ -1085,6 +1214,10 @@ ngx_delete_pidfile(ngx_cycle_t *cycle)
 }
 
 
+/**
+ * main函数调用
+ * 处理信号；例如./nginx -s stop,则处理Nginx的停止信号
+ */
 ngx_int_t
 ngx_signal_process(ngx_cycle_t *cycle, char *sig)
 {
@@ -1103,6 +1236,7 @@ ngx_signal_process(ngx_cycle_t *cycle, char *sig)
     file.name = ccf->pid;
     file.log = cycle->log;
 
+    /* 通过/usr/local/nginx/logs/nginx.pid 获取进行ID号 */
     file.fd = ngx_open_file(file.name.data, NGX_FILE_RDONLY,
                             NGX_FILE_OPEN, NGX_FILE_DEFAULT_ACCESS);
 
@@ -1112,6 +1246,7 @@ ngx_signal_process(ngx_cycle_t *cycle, char *sig)
         return 1;
     }
 
+    //读取文件获取master id
     n = ngx_read_file(&file, buf, NGX_INT64_LEN + 2, 0);
 
     if (ngx_close_file(file.fd) == NGX_FILE_ERROR) {
@@ -1125,6 +1260,7 @@ ngx_signal_process(ngx_cycle_t *cycle, char *sig)
 
     while (n-- && (buf[n] == CR || buf[n] == LF)) { /* void */ }
 
+    //转为整数的pid
     pid = ngx_atoi(buf, ++n);
 
     if (pid == (ngx_pid_t) NGX_ERROR) {
@@ -1134,6 +1270,7 @@ ngx_signal_process(ngx_cycle_t *cycle, char *sig)
         return 1;
     }
 
+    //向进程发送信号
     return ngx_os_signal_process(cycle, sig, pid);
 
 }
@@ -1170,6 +1307,9 @@ ngx_test_lockfile(u_char *file, ngx_log_t *log)
 }
 
 
+/**
+ * 重新打开文件，当收到reopen信号时调用
+ */
 void
 ngx_reopen_files(ngx_cycle_t *cycle, ngx_uid_t user)
 {
@@ -1181,6 +1321,7 @@ ngx_reopen_files(ngx_cycle_t *cycle, ngx_uid_t user)
     part = &cycle->open_files.part;
     file = part->elts;
 
+    //遍历cycle->open_files链表
     for (i = 0; /* void */ ; i++) {
 
         if (i >= part->nelts) {
@@ -1196,10 +1337,12 @@ ngx_reopen_files(ngx_cycle_t *cycle, ngx_uid_t user)
             continue;
         }
 
+        //如果需要flush，则调用flush方法
         if (file[i].flush) {
             file[i].flush(&file[i], cycle->log);
         }
 
+        //重新打开文件
         fd = ngx_open_file(file[i].name.data, NGX_FILE_APPEND,
                            NGX_FILE_CREATE_OR_OPEN, NGX_FILE_DEFAULT_ACCESS);
 
@@ -1217,6 +1360,7 @@ ngx_reopen_files(ngx_cycle_t *cycle, ngx_uid_t user)
         if (user != (ngx_uid_t) NGX_CONF_UNSET_UINT) {
             ngx_file_info_t  fi;
 
+            //获取文件信息
             if (ngx_file_info(file[i].name.data, &fi) == NGX_FILE_ERROR) {
                 ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
                               ngx_file_info_n " \"%s\" failed",
@@ -1231,6 +1375,7 @@ ngx_reopen_files(ngx_cycle_t *cycle, ngx_uid_t user)
                 continue;
             }
 
+            //st_uid为文件所有者uid
             if (fi.st_uid != user) {
                 if (chown((const char *) file[i].name.data, user, -1) == -1) {
                     ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
@@ -1281,6 +1426,7 @@ ngx_reopen_files(ngx_cycle_t *cycle, ngx_uid_t user)
         }
 #endif
 
+        //关闭原来的fd
         if (ngx_close_file(file[i].fd) == NGX_FILE_ERROR) {
             ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
                           ngx_close_file_n " \"%s\" failed",
@@ -1294,6 +1440,21 @@ ngx_reopen_files(ngx_cycle_t *cycle, ngx_uid_t user)
 }
 
 
+/**
+ * 初始化1块大小为size、名称为name的slab共享内存池, 并添加到cycle的共享内存结构
+ * 
+ * cf： 配置解析结构体， 通常在配置文件里设置共享内存的大小
+ * name：slab共享内存池的名字， 每一个  shared zone 的name参数必须是唯一的
+ * size：共享内存的大小
+ * tag：用于防止两个不相关的Nginx模块所定义的内存池恰好具有同样的名字，从而造成数据错乱
+ *      通常tag参数传入本模块结构体的地址
+ * 
+ * 会比较前一次name对应的共享内存size是否与本次size参数相等，以及tag地址是否相等，
+ * 如果相等，直接返回上一次的共享内存对应的ngx_shm_zone_t，否则会返回NULL
+ * 
+ * 
+ * 返回的ngx_shm_zone_t.shm.addr即为内存地址
+ */
 ngx_shm_zone_t *
 ngx_shared_memory_add(ngx_conf_t *cf, ngx_str_t *name, size_t size, void *tag)
 {
@@ -1304,6 +1465,7 @@ ngx_shared_memory_add(ngx_conf_t *cf, ngx_str_t *name, size_t size, void *tag)
     part = &cf->cycle->shared_memory.part;
     shm_zone = part->elts;
 
+    //查找是否已经存在相同名称的共享内存池了
     for (i = 0; /* void */ ; i++) {
 
         if (i >= part->nelts) {
@@ -1325,6 +1487,7 @@ ngx_shared_memory_add(ngx_conf_t *cf, ngx_str_t *name, size_t size, void *tag)
             continue;
         }
 
+        //相同名称的zone，但是tag不同，记录错误日志，并返回NULL
         if (tag != shm_zone[i].tag) {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                             "the shared memory zone \"%V\" is "
@@ -1333,10 +1496,12 @@ ngx_shared_memory_add(ngx_conf_t *cf, ngx_str_t *name, size_t size, void *tag)
             return NULL;
         }
 
+        //如果原size=0, 更新为新的size
         if (shm_zone[i].shm.size == 0) {
             shm_zone[i].shm.size = size;
         }
 
+        //size和原size不同
         if (size && size != shm_zone[i].shm.size) {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                             "the size %uz of shared memory zone \"%V\" "
@@ -1345,15 +1510,18 @@ ngx_shared_memory_add(ngx_conf_t *cf, ngx_str_t *name, size_t size, void *tag)
             return NULL;
         }
 
+        //直接返回已经存在的
         return &shm_zone[i];
     }
 
+    //创建一个新的ngx_shm_zone_t
     shm_zone = ngx_list_push(&cf->cycle->shared_memory);
 
     if (shm_zone == NULL) {
         return NULL;
     }
 
+    //初始化
     shm_zone->data = NULL;
     shm_zone->shm.log = cf->cycle->log;
     shm_zone->shm.addr = NULL;
@@ -1368,6 +1536,10 @@ ngx_shared_memory_add(ngx_conf_t *cf, ngx_str_t *name, size_t size, void *tag)
 }
 
 
+/**
+ * ngx_init_cycle方法调用
+ * 清理旧的cycle
+ */
 static void
 ngx_clean_old_cycles(ngx_event_t *ev)
 {
@@ -1425,6 +1597,9 @@ ngx_clean_old_cycles(ngx_event_t *ev)
 }
 
 
+/**
+ * 当优雅停止时，增加一个优雅停止超时定时器
+ */
 void
 ngx_set_shutdown_timer(ngx_cycle_t *cycle)
 {
@@ -1443,6 +1618,9 @@ ngx_set_shutdown_timer(ngx_cycle_t *cycle)
 }
 
 
+/**
+ * 优雅停止的超时定时器，定时器超时后执行此方法
+ */
 static void
 ngx_shutdown_timer_handler(ngx_event_t *ev)
 {
@@ -1454,6 +1632,7 @@ ngx_shutdown_timer_handler(ngx_event_t *ev)
 
     c = cycle->connections;
 
+    //遍历所有的connection
     for (i = 0; i < cycle->connection_n; i++) {
 
         if (c[i].fd == (ngx_socket_t) -1
@@ -1468,9 +1647,11 @@ ngx_shutdown_timer_handler(ngx_event_t *ev)
         ngx_log_debug1(NGX_LOG_DEBUG_CORE, ev->log, 0,
                        "*%uA shutdown timeout", c[i].number);
 
+        //设置连接标识
         c[i].close = 1;
         c[i].error = 1;
 
+        //调用此连接上的读事件处理函数
         c[i].read->handler(c[i].read);
     }
 }

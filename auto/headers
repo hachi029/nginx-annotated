@@ -3,6 +3,8 @@
 # Copyright (C) Nginx, Inc.
 
 
+# 生成头文件的宏定义。生成的定义放在objs/ngx_auto_headers.h里面
+
 ngx_include="unistd.h";      . auto/include
 ngx_include="inttypes.h";    . auto/include
 ngx_include="limits.h";      . auto/include

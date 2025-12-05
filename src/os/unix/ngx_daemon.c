@@ -9,6 +9,9 @@
 #include <ngx_core.h>
 
 
+/**
+ * main函数调用，设置当前进程为守护进程
+ */
 ngx_int_t
 ngx_daemon(ngx_log_t *log)
 {

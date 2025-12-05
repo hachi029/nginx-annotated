@@ -12,16 +12,24 @@
 #include <ngx_mail.h>
 
 
+/**
+ * 本模块server级别配置结构体
+ */
 typedef struct {
+    //auth_http 指令中url解析出来的地址列表
     ngx_addr_t                     *peer;
 
+    //auth_http_timeout  Sets the timeout for communication with the authentication server.
     ngx_msec_t                      timeout;
     ngx_flag_t                      pass_client_cert;
 
+    //Host请求头
     ngx_str_t                       host_header;
+    //Sets the URL of the HTTP authentication server
     ngx_str_t                       uri;
     ngx_str_t                       header;
 
+    //auth_http_header 配置指令设置的多个header
     ngx_array_t                    *headers;
 
     u_char                         *file;
@@ -1500,6 +1508,9 @@ ngx_mail_auth_http_escape(ngx_pool_t *pool, ngx_str_t *text, ngx_str_t *escaped)
 }
 
 
+/**
+ * 创建server级别的配置结构体
+ */
 static void *
 ngx_mail_auth_http_create_conf(ngx_conf_t *cf)
 {
@@ -1581,6 +1592,11 @@ ngx_mail_auth_http_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 }
 
 
+/**
+ * Syntax:	auth_http URL;
+ * 
+ * auth_http 配置指令解析
+ */
 static char *
 ngx_mail_auth_http(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -1597,11 +1613,13 @@ ngx_mail_auth_http(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     u.default_port = 80;
     u.uri_part = 1;
 
+    //u跳过 "http://"
     if (ngx_strncmp(u.url.data, "http://", 7) == 0) {
         u.url.len -= 7;
         u.url.data += 7;
     }
 
+    //解析url
     if (ngx_parse_url(cf->pool, &u) != NGX_OK) {
         if (u.err) {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
@@ -1611,15 +1629,18 @@ ngx_mail_auth_http(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
+    //设置解析出来的地址
     ahcf->peer = u.addrs;
 
     if (u.family != AF_UNIX) {
         ahcf->host_header = u.host;
 
     } else {
+        //如果是unix套接字
         ngx_str_set(&ahcf->host_header, "localhost");
     }
 
+    //设置uri
     ahcf->uri = u.uri;
 
     if (ahcf->uri.len == 0) {
@@ -1630,6 +1651,10 @@ ngx_mail_auth_http(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * Syntax:	auth_http_header header value;
+ * auth_http_header 配置指令解析
+ */
 static char *
 ngx_mail_auth_http_header(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -1638,6 +1663,7 @@ ngx_mail_auth_http_header(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_str_t        *value;
     ngx_table_elt_t  *header;
 
+    //如果headers为NULL，则进行初始化
     if (ahcf->headers == NULL) {
         ahcf->headers = ngx_array_create(cf->pool, 1, sizeof(ngx_table_elt_t));
         if (ahcf->headers == NULL) {
@@ -1645,6 +1671,7 @@ ngx_mail_auth_http_header(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         }
     }
 
+    //动态数组中加入一个新的元素
     header = ngx_array_push(ahcf->headers);
     if (header == NULL) {
         return NGX_CONF_ERROR;
@@ -1652,6 +1679,7 @@ ngx_mail_auth_http_header(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     value = cf->args->elts;
 
+    //设置header的key/value
     header->key = value[1];
     header->value = value[2];
 

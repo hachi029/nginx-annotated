@@ -16,36 +16,51 @@
 #define NGX_RESOLVER_TCP_WSIZE  8192
 
 
+// 对应报文头的6个16bit字段。12个8bit
 typedef struct {
+     // ID标识字段
     u_char  ident_hi;
     u_char  ident_lo;
+    // FLAG标识
     u_char  flags_hi;
     u_char  flags_lo;
+    //  QDCOUNT 查询段中的问题记录数
     u_char  nqs_hi;
     u_char  nqs_lo;
+    // ANCOUNT  应答段中的问题记录数
     u_char  nan_hi;
     u_char  nan_lo;
+    // NSCOUNT  授权记录数
     u_char  nns_hi;
     u_char  nns_lo;
+    // ARCOUNT  附加记录数
     u_char  nar_hi;
     u_char  nar_lo;
 } ngx_resolver_hdr_t;
 
 
+// 对应查询报文2个16bit字段。4个8bit
 typedef struct {
+    // QTYPE 无符号16bit整数表示查询的协议类型.
     u_char  type_hi;
     u_char  type_lo;
+    //  无符号16bit整数表示查询的类,比如，IN代表Internet.
     u_char  class_hi;
     u_char  class_lo;
 } ngx_resolver_qs_t;
 
 
+// 应答报文 4个字段
 typedef struct {
+    // 表示DNS协议的类型.
     u_char  type_hi;
     u_char  type_lo;
+    // 表示RDATA的类.
     u_char  class_hi;
     u_char  class_lo;
+    // 4字节无符号整数表示资源记录可以缓存的时间。0代表只能被传输，但是不能被缓存。
     u_char  ttl[4];
+    // 2个字节无符号整数表示RDATA的长度
     u_char  len_hi;
     u_char  len_lo;
 } ngx_resolver_an_t;
@@ -128,7 +143,56 @@ static ngx_resolver_node_t *ngx_resolver_lookup_addr6(ngx_resolver_t *r,
     struct in6_addr *addr, uint32_t hash);
 #endif
 
+/**
+ * https://github.com/vislee/leevis.com/issues/106
+ * https://www.nginx.org.cn/article/detail/356
+ * 
+ * NGINX提供了静态和动态解析两种方式:
+ * a.静态解析
+ *  在NGINX启动运行时，会使用本机在/etc/hosts和/etc/resolve.conf中配置的主机和dns服务器对域名进行解析。
+ *  这个解析过程是通过lib C的函数getaddrinfo进行的同步操作。如果解析失败，NGINX就不能成功启动。解析得到的ip地址会一直伴随着NGINX运行的整个生命周期。
+ *  如果在运行期间对应域名的ip地址发生变化，服务就会中断。唯一的解决办法就是重新启动NGINX。
+ * b.动态解析
+ *  开源版的NGINX提供了resolver这种动态的dns解决方案。核心思想是NGINX自身充当dns的客户端进行动态dns解析。
+ *  会通过resolver指令定义的dns服务器进行动态解析。在此配置中，通过resolver得到的解析结果有效期是10秒。有效期过后，再次访问根目录时就会对域名进行重新解析。
+ *  动态域名解析是通过resolver指令和变量来实现的。指令resolve可以在http范围内全局设定，也可以在某一个server甚至某一个location里面单独设定。
+ * 
+ * 
+ * http {
+ *   server {
+ *     listen 80;
+ *     set         $test     private.server1.com.cn;
+ *     location / {
+ *           resolver 8.8.8.8 valid=10s;
+ *           proxy_pass http://$test;
+ *     }
+ *     location /duplicate/ {
+ *          resolver 114.114.114.114 valid=10s;
+ *          proxy_pass http://$test;
+ *     }
+ *   }
+ * }
+ * 
+ * 在如上配置中，如果访问服务的根目录和/duplicate/目录，需要反向代理的服务器同为 private.server1.com.cn。
+ * 但是当访问这两个不同的目录时，使用的dns服务器分别是8.8.8.8和114.114.114.114。而且，通过这两个dns服务器解析的结果不能被针对根目录和/duplicate/目录的访问共享。
+ * 
+ * 指令resolver的配置语法是： resolver 114.114.114.114 8.8.8.8 valid=10s ipv6=off;
+ * 
+ * 这个配置中指定了两个dns 服务器114.114.114.114和8.8.8.8，这两个dns服务器会被依次轮流用而不是按照主从的角色去使用。
+ * 如果某一个dns服务器不可达，会尝试另外的dns服务，直到有dns服务器能返回解析结果。无论返回的结果是成功还是失败，它都会被采用。
+ * 即使是失败也不会再去尝试另外的dns服务器。 另外，如果因为网络原因导致dns服务器暂时不可达，原来的dns过期缓存也没有办法得到重复使用。
+ * 参数valid指定了解析结果的有效期。
+ * 参数ipv6用来指明是否接收解析结果中的ipv6地址。对于IPv6的配置，默认是开启的，也就是当域名解析到既有
+ * 
+ * ipv4又有ipv6时，都会解析到。可以通过ipv6=on|off,来控制ipv6解析。
+ */
 
+/**
+ * 当遇到一个resolver指令时，就会根据配置创建一个域名解析器。 resolver可以配置在http/server/location/upstream/strean/mail等上下文中
+ * 创建域名解析器， 一个ngx_resolver_t代表包含多个dns服务器地址的dns解析器
+ * 
+ * proxy_pass也可能创建域名解析
+ */
 ngx_resolver_t *
 ngx_resolver_create(ngx_conf_t *cf, ngx_str_t *names, ngx_uint_t n)
 {
@@ -139,16 +203,19 @@ ngx_resolver_create(ngx_conf_t *cf, ngx_str_t *names, ngx_uint_t n)
     ngx_pool_cleanup_t         *cln;
     ngx_resolver_connection_t  *rec;
 
+    //创建一个 ngx_resolver_t 结构体
     r = ngx_pcalloc(cf->pool, sizeof(ngx_resolver_t));
     if (r == NULL) {
         return NULL;
     }
 
+    //创建一个ngx_event_t
     r->event = ngx_pcalloc(cf->pool, sizeof(ngx_event_t));
     if (r->event == NULL) {
         return NULL;
     }
 
+    //添加一个清理函数
     cln = ngx_pool_cleanup_add(cf->pool, 0);
     if (cln == NULL) {
         return NULL;
@@ -159,6 +226,7 @@ ngx_resolver_create(ngx_conf_t *cf, ngx_str_t *names, ngx_uint_t n)
 
     r->ipv4 = 1;
 
+    //初始化rbtree
     ngx_rbtree_init(&r->name_rbtree, &r->name_sentinel,
                     ngx_resolver_rbtree_insert_value);
 
@@ -168,6 +236,7 @@ ngx_resolver_create(ngx_conf_t *cf, ngx_str_t *names, ngx_uint_t n)
     ngx_rbtree_init(&r->addr_rbtree, &r->addr_sentinel,
                     ngx_rbtree_insert_value);
 
+    //初始化队列
     ngx_queue_init(&r->name_resend_queue);
     ngx_queue_init(&r->srv_resend_queue);
     ngx_queue_init(&r->addr_resend_queue);
@@ -201,6 +270,7 @@ ngx_resolver_create(ngx_conf_t *cf, ngx_str_t *names, ngx_uint_t n)
     r->log = &cf->cycle->new_log;
     r->log_level = NGX_LOG_ERR;
 
+    //n 为dns服务器的个数, 多个以轮询方式做负载均衡
     if (n) {
         if (ngx_array_init(&r->connections, cf->pool, n,
                            sizeof(ngx_resolver_connection_t))
@@ -211,6 +281,7 @@ ngx_resolver_create(ngx_conf_t *cf, ngx_str_t *names, ngx_uint_t n)
     }
 
     for (i = 0; i < n; i++) {
+        //valid=30s; 配置dns解析结果的有效时间
         if (ngx_strncmp(names[i].data, "valid=", 6) == 0) {
             s.len = names[i].len - 6;
             s.data = names[i].data + 6;
@@ -227,6 +298,7 @@ ngx_resolver_create(ngx_conf_t *cf, ngx_str_t *names, ngx_uint_t n)
         }
 
 #if (NGX_HAVE_INET6)
+        //ipv4=on/off; 配置是否解析ipv4地址
         if (ngx_strncmp(names[i].data, "ipv4=", 5) == 0) {
 
             if (ngx_strcmp(&names[i].data[5], "on") == 0) {
@@ -244,6 +316,7 @@ ngx_resolver_create(ngx_conf_t *cf, ngx_str_t *names, ngx_uint_t n)
             continue;
         }
 
+        //ipv6=on/off; 配置是否解析ipv6地址
         if (ngx_strncmp(names[i].data, "ipv6=", 5) == 0) {
 
             if (ngx_strcmp(&names[i].data[5], "on") == 0) {
@@ -267,6 +340,7 @@ ngx_resolver_create(ngx_conf_t *cf, ngx_str_t *names, ngx_uint_t n)
         u.url = names[i];
         u.default_port = 53;
 
+        //dns服务器可以是域名，如果是域名，则需要解析成ip地址
         if (ngx_parse_url(cf->pool, &u) != NGX_OK) {
             if (u.err) {
                 ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
@@ -277,6 +351,7 @@ ngx_resolver_create(ngx_conf_t *cf, ngx_str_t *names, ngx_uint_t n)
             return NULL;
         }
 
+        //u.naddrs 为解析出来的地址个数， 为每个地址分配一个 ngx_resolver_connection_t 结构体
         rec = ngx_array_push_n(&r->connections, u.naddrs);
         if (rec == NULL) {
             return NULL;
@@ -309,6 +384,11 @@ ngx_resolver_create(ngx_conf_t *cf, ngx_str_t *names, ngx_uint_t n)
 }
 
 
+/**
+ * 添加到cf->pool上的清理函数
+ * 清理域名解析器， data为ngx_resolver_t结构体指针
+ * 释放所有的资源
+ */
 static void
 ngx_resolver_cleanup(void *data)
 {
@@ -390,16 +470,23 @@ ngx_resolver_cleanup_tree(ngx_resolver_t *r, ngx_rbtree_t *tree)
 }
 
 
+/**
+ * 开始运行时域名解析，创建解析上下文ngx_resolver_ctx_t
+ */
 ngx_resolver_ctx_t *
 ngx_resolve_start(ngx_resolver_t *r, ngx_resolver_ctx_t *temp)
 {
     in_addr_t            addr;
     ngx_resolver_ctx_t  *ctx;
 
+    //一般使用会定义一个局部变量ngx_resolver_ctx_t tmp;
+    // 把tmp的指针传递进来，name赋值为要解析的域名
     if (temp) {
+        // 校验name是否就是ip地址
         addr = ngx_inet_addr(temp->name.data, temp->name.len);
 
         if (addr != INADDR_NONE) {
+            // name就是ip地址
             temp->resolver = r;
             temp->state = NGX_OK;
             temp->naddrs = 1;
@@ -411,6 +498,7 @@ ngx_resolve_start(ngx_resolver_t *r, ngx_resolver_ctx_t *temp)
             temp->sin.sin_addr.s_addr = addr;
             temp->quick = 1;
 
+            // 直接返回tmp指针。
             return temp;
         }
     }
@@ -419,6 +507,7 @@ ngx_resolve_start(ngx_resolver_t *r, ngx_resolver_ctx_t *temp)
         return NGX_NO_RESOLVER;
     }
 
+    //否则，创建一个
     ctx = ngx_resolver_calloc(r, sizeof(ngx_resolver_ctx_t));
 
     if (ctx) {
@@ -429,6 +518,9 @@ ngx_resolve_start(ngx_resolver_t *r, ngx_resolver_ctx_t *temp)
 }
 
 
+/**
+ * 异步域名解析
+ */
 ngx_int_t
 ngx_resolve_name(ngx_resolver_ctx_t *ctx)
 {
@@ -447,11 +539,14 @@ ngx_resolve_name(ngx_resolver_ctx_t *ctx)
                    "resolve: \"%V\"", &ctx->name);
 
     if (ctx->quick) {
+        // 不用发起dns查询，则直接调用业务赋值的回调函数。
+        // 例如：upstream模块的ngx_http_upstream_resolve_handler
         ctx->handler(ctx);
         return NGX_OK;
     }
 
     if (ctx->service.len) {
+        // 目前开源的代码中没有用到
         slen = ctx->service.len;
 
         if (ngx_strlchr(ctx->service.data,
@@ -477,6 +572,7 @@ ngx_resolve_name(ngx_resolver_ctx_t *ctx)
 
         /* lock name mutex */
 
+        //进行实际的dns域名解析
         rc = ngx_resolve_name_locked(r, ctx, &name);
 
         ngx_resolver_free(r, name.data);
@@ -484,6 +580,7 @@ ngx_resolve_name(ngx_resolver_ctx_t *ctx)
     } else {
         /* lock name mutex */
 
+        // 发起dns查询
         rc = ngx_resolve_name_locked(r, ctx, &ctx->name);
     }
 
@@ -511,6 +608,9 @@ failed:
 }
 
 
+/**
+ * 域名解析结束，释放锁及相关资源
+ */
 void
 ngx_resolve_name_done(ngx_resolver_ctx_t *ctx)
 {
@@ -602,6 +702,11 @@ done:
 }
 
 
+/**
+ * 进行实际的dns域名解析
+ * 
+ * name为要解析的域名
+ */
 static ngx_int_t
 ngx_resolve_name_locked(ngx_resolver_t *r, ngx_resolver_ctx_t *ctx,
     ngx_str_t *name)
@@ -621,6 +726,7 @@ ngx_resolve_name_locked(ngx_resolver_t *r, ngx_resolver_ctx_t *ctx,
     hash = ngx_crc32_short(name->data, name->len);
 
     if (ctx->service.len) {
+        //红黑树查找, r->srv_rbtree
         rn = ngx_resolver_lookup_srv(r, name, hash);
 
         tree = &r->srv_rbtree;
@@ -628,6 +734,8 @@ ngx_resolve_name_locked(ngx_resolver_t *r, ngx_resolver_ctx_t *ctx,
         expire_queue = &r->srv_expire_queue;
 
     } else {
+        //红黑树查找, r->name_rbtree
+        // 先从缓存中查询，缓存没有命中则返回NULL
         rn = ngx_resolver_lookup_name(r, name, hash);
 
         tree = &r->name_rbtree;
@@ -640,6 +748,7 @@ ngx_resolve_name_locked(ngx_resolver_t *r, ngx_resolver_ctx_t *ctx,
         /* ctx can be a list after NGX_RESOLVE_CNAME */
         for (last = ctx; last->next; last = last->next);
 
+        //如果该节点仍有效
         if (rn->valid >= ngx_time()) {
 
             ngx_log_debug0(NGX_LOG_DEBUG_CORE, r->log, 0, "resolve cached");
@@ -691,6 +800,7 @@ ngx_resolve_name_locked(ngx_resolver_t *r, ngx_resolver_ctx_t *ctx,
 
                     next = ctx->next;
 
+                    //调用handler 
                     ctx->handler(ctx);
 
                     ctx = next;
@@ -807,11 +917,15 @@ ngx_resolve_name_locked(ngx_resolver_t *r, ngx_resolver_ctx_t *ctx,
 
     } else {
 
+        /*红黑树中未找到*/
+
+        //分配并初始化rn节点
         rn = ngx_resolver_alloc(r, sizeof(ngx_resolver_node_t));
         if (rn == NULL) {
             return NGX_ERROR;
         }
 
+        //复制name
         rn->name = ngx_resolver_dup(r, name->data, name->len);
         if (rn->name == NULL) {
             ngx_resolver_free(r, rn);
@@ -825,6 +939,7 @@ ngx_resolve_name_locked(ngx_resolver_t *r, ngx_resolver_ctx_t *ctx,
         rn->query6 = NULL;
 #endif
 
+        //加入到红黑树name_rbtree中
         ngx_rbtree_insert(tree, &rn->node);
     }
 
@@ -871,6 +986,7 @@ ngx_resolve_name_locked(ngx_resolver_t *r, ngx_resolver_ctx_t *ctx,
 #endif
     rn->nsrvs = 0;
 
+    //发送dns解析请求
     if (ngx_resolver_send_query(r, rn) != NGX_OK) {
 
         /* immediately retry once on failure */
@@ -883,16 +999,19 @@ ngx_resolve_name_locked(ngx_resolver_t *r, ngx_resolver_ctx_t *ctx,
         (void) ngx_resolver_send_query(r, rn);
     }
 
+    //设置超时定时器
     if (ngx_resolver_set_timeout(r, ctx) != NGX_OK) {
         goto failed;
     }
 
+    //如果这是resend_queue中的首个元素，则需要使能r->event重传定时器。该定时器超时时，会遍历resolver的resend_queue，对所有需要重传的node进行判断。
     if (ngx_resolver_resend_empty(r)) {
         ngx_add_timer(r->event, (ngx_msec_t) (r->resend_timeout * 1000));
     }
 
     rn->expire = ngx_time() + r->resend_timeout;
 
+    //将rn加入resolver的resend_queue队列，用于DNS的超时重传
     ngx_queue_insert_head(resend_queue, &rn->queue);
 
     rn->code = 0;
@@ -1274,6 +1393,9 @@ ngx_resolver_expire(ngx_resolver_t *r, ngx_rbtree_t *tree, ngx_queue_t *queue)
 }
 
 
+/**
+ * 发送DNS解析请求
+ */
 static ngx_int_t
 ngx_resolver_send_query(ngx_resolver_t *r, ngx_resolver_node_t *rn)
 {
@@ -1317,6 +1439,10 @@ ngx_resolver_send_query(ngx_resolver_t *r, ngx_resolver_node_t *rn)
 }
 
 
+/**
+ * ngx_resolver_send_query 调用
+ * udp方式发送DNS查询请求
+ */
 static ngx_int_t
 ngx_resolver_send_udp_query(ngx_resolver_t *r, ngx_resolver_connection_t  *rec,
     u_char *query, u_short qlen)
@@ -1324,15 +1450,18 @@ ngx_resolver_send_udp_query(ngx_resolver_t *r, ngx_resolver_connection_t  *rec,
     ssize_t  n;
 
     if (rec->udp == NULL) {
+        //向dns server发起连接， 并把可读事件添加到epoll
         if (ngx_udp_connect(rec) != NGX_OK) {
             return NGX_ERROR;
         }
 
         rec->udp->data = rec;
+        //读事件处理函数
         rec->udp->read->handler = ngx_resolver_udp_read;
         rec->udp->read->resolver = 1;
     }
 
+    // 发送dns查询数据报
     n = ngx_send(rec->udp, query, qlen);
 
     if (n == NGX_ERROR) {
@@ -1355,6 +1484,10 @@ failed:
 }
 
 
+/**
+ * ngx_resolver_send_query 调用
+ * tcp方式发送DNS查询请求, 建立tcp连接会把连接可读可写添加到epoll
+ */
 static ngx_int_t
 ngx_resolver_send_tcp_query(ngx_resolver_t *r, ngx_resolver_connection_t *rec,
     u_char *query, u_short qlen)
@@ -1563,6 +1696,11 @@ ngx_resolver_resend(ngx_resolver_t *r, ngx_rbtree_t *tree, ngx_queue_t *queue)
 }
 
 
+/**
+ * 判断重传队列是否为空
+ * name_resend_queue/srv_resend_queue/addr6_resend_queue/addr_resend_queue
+ * 
+ */
 static ngx_uint_t
 ngx_resolver_resend_empty(ngx_resolver_t *r)
 {
@@ -1575,6 +1713,10 @@ ngx_resolver_resend_empty(ngx_resolver_t *r)
 }
 
 
+/**
+ * dns解析，udp方式读事件监听处理函数
+ * 当dns响应包到达时，此函数被调用， 解析DNS查询结果
+ */
 static void
 ngx_resolver_udp_read(ngx_event_t *rev)
 {
@@ -1614,6 +1756,9 @@ failed:
 }
 
 
+/**
+ * tcp 方式可写回调函数
+ */
 static void
 ngx_resolver_tcp_write(ngx_event_t *wev)
 {
@@ -1671,6 +1816,9 @@ failed:
 }
 
 
+/**
+ *  tcp 方式可读回调函数
+ */
 static void
 ngx_resolver_tcp_read(ngx_event_t *rev)
 {
@@ -1740,6 +1888,9 @@ failed:
 }
 
 
+/**
+ * 处理DNS响应数据包
+ */
 static void
 ngx_resolver_process_response(ngx_resolver_t *r, u_char *buf, size_t n,
     ngx_uint_t tcp)
@@ -1755,6 +1906,7 @@ ngx_resolver_process_response(ngx_resolver_t *r, u_char *buf, size_t n,
     ngx_resolver_hdr_t   *response;
     ngx_resolver_node_t  *rn;
 
+    // n为接收数据的长度，是否小于dns报头大小
     if (n < sizeof(ngx_resolver_hdr_t)) {
         goto short_response;
     }
@@ -1764,7 +1916,7 @@ ngx_resolver_process_response(ngx_resolver_t *r, u_char *buf, size_t n,
     ident = (response->ident_hi << 8) + response->ident_lo;
     flags = (response->flags_hi << 8) + response->flags_lo;
     nqs = (response->nqs_hi << 8) + response->nqs_lo;
-    nan = (response->nan_hi << 8) + response->nan_lo;
+    nan = (response->nan_hi << 8) + response->nan_lo;   // 应答记录数
     trunc = flags & 0x0200;
 
     ngx_log_debug6(NGX_LOG_DEBUG_CORE, r->log, 0,
@@ -1785,6 +1937,7 @@ ngx_resolver_process_response(ngx_resolver_t *r, u_char *buf, size_t n,
 
     if (code == NGX_RESOLVE_FORMERR) {
 
+        // 报文格式错误
         times = 0;
 
         for (q = ngx_queue_head(&r->name_resend_queue);
@@ -1819,6 +1972,7 @@ ngx_resolver_process_response(ngx_resolver_t *r, u_char *buf, size_t n,
         goto dns_error;
     }
 
+    // 查询记录数
     if (nqs != 1) {
         err = "invalid number of questions in DNS response";
         goto done;
@@ -1876,6 +2030,9 @@ found:
     case NGX_RESOLVE_AAAA:
 #endif
 
+        // 解析A记录，IP地址
+        //  buf：DNS应答内容 n：内容长度
+        //  ident：ID标识  code：应答码 qtype：协议类型 nan：应答记录数 trunc 是否截断
         ngx_resolver_process_a(r, buf, n, ident, code, qtype, nan, trunc,
                                i + sizeof(ngx_resolver_qs_t));
 
@@ -1929,6 +2086,9 @@ dns_error:
 }
 
 
+/**
+ * 解析域名对应的v4和v6地址。解析A记录
+ */
 static void
 ngx_resolver_process_a(ngx_resolver_t *r, u_char *buf, size_t n,
     ngx_uint_t ident, ngx_uint_t code, ngx_uint_t qtype,
@@ -1951,6 +2111,7 @@ ngx_resolver_process_a(ngx_resolver_t *r, u_char *buf, size_t n,
     ngx_resolver_addr_t        *addrs;
     ngx_resolver_connection_t  *rec;
 
+    // 解析请求的域名
     if (ngx_resolver_copy(r, &name, buf,
                           buf + sizeof(ngx_resolver_hdr_t), buf + n)
         != NGX_OK)
@@ -1964,6 +2125,7 @@ ngx_resolver_process_a(ngx_resolver_t *r, u_char *buf, size_t n,
 
     /* lock name mutex */
 
+    //首先根据域名查找rn节点, 然后把解析响应的结果存放到rn中,同时copy一份结果赋值给ngx_resolver_ctx_t  ctx
     rn = ngx_resolver_lookup_name(r, &name, hash);
 
     if (rn == NULL) {
@@ -2128,6 +2290,7 @@ ngx_resolver_process_a(ngx_resolver_t *r, u_char *buf, size_t n,
         }
 #endif
 
+        //此时dns解析成功然后遍历rn->waiting
         next = rn->waiting;
         rn->waiting = NULL;
 
@@ -2137,6 +2300,7 @@ ngx_resolver_process_a(ngx_resolver_t *r, u_char *buf, size_t n,
 
         /* unlock name mutex */
 
+        //调用ctx->handler也就是ngx_http_upstream_resolve_handler函数
         while (next) {
             ctx = next;
             ctx->state = code;
@@ -3660,6 +3824,10 @@ ngx_resolver_rbtree_insert_addr6_value(ngx_rbtree_node_t *temp,
 #endif
 
 
+/**
+ * 建立DNS查询请求命令字符串（rn->query）.
+ * 封装dns查询数据包
+ */
 static ngx_int_t
 ngx_resolver_create_name_query(ngx_resolver_t *r, ngx_resolver_node_t *rn,
     ngx_str_t *name)
@@ -4069,6 +4237,9 @@ done:
 }
 
 
+/**
+ * 设置解析超时定时器
+ */
 static ngx_int_t
 ngx_resolver_set_timeout(ngx_resolver_t *r, ngx_resolver_ctx_t *ctx)
 {
@@ -4076,23 +4247,29 @@ ngx_resolver_set_timeout(ngx_resolver_t *r, ngx_resolver_ctx_t *ctx)
         return NGX_OK;
     }
 
+    //创建一个event结构体
     ctx->event = ngx_resolver_calloc(r, sizeof(ngx_event_t));
     if (ctx->event == NULL) {
         return NGX_ERROR;
     }
 
+    //时间处理器
     ctx->event->handler = ngx_resolver_timeout_handler;
     ctx->event->data = ctx;
     ctx->event->log = r->log;
     ctx->event->cancelable = ctx->cancelable;
     ctx->ident = -1;
 
+    //添加timer
     ngx_add_timer(ctx->event, ctx->timeout);
 
     return NGX_OK;
 }
 
 
+/**
+ * DNS 解析超时的handler
+ */
 static void
 ngx_resolver_timeout_handler(ngx_event_t *ev)
 {
@@ -4151,6 +4328,9 @@ ngx_resolver_free_node(ngx_resolver_t *r, ngx_resolver_node_t *rn)
 }
 
 
+/**
+ * 分配size大小的内存，传入r只是为了使用r的log
+ */
 static void *
 ngx_resolver_alloc(ngx_resolver_t *r, size_t size)
 {
@@ -4166,6 +4346,9 @@ ngx_resolver_alloc(ngx_resolver_t *r, size_t size)
 }
 
 
+/**
+ * 分配size大小的内存，分配的内存会被清0
+ */
 static void *
 ngx_resolver_calloc(ngx_resolver_t *r, size_t size)
 {
@@ -4199,6 +4382,9 @@ ngx_resolver_free_locked(ngx_resolver_t *r, void *p)
 }
 
 
+/**
+ * 分配size大小的内存，并拷贝src内容至新分配内存中
+ */
 static void *
 ngx_resolver_dup(ngx_resolver_t *r, void *src, size_t size)
 {
@@ -4454,6 +4640,9 @@ ngx_resolver_log_error(ngx_log_t *log, u_char *buf, size_t len)
 }
 
 
+/**
+ * 创建一个socket并且连接到dns server的服务端口
+ */
 static ngx_int_t
 ngx_udp_connect(ngx_resolver_connection_t *rec)
 {
@@ -4463,6 +4652,7 @@ ngx_udp_connect(ngx_resolver_connection_t *rec)
     ngx_socket_t       s;
     ngx_connection_t  *c;
 
+    //创建socket
     s = ngx_socket(rec->sockaddr->sa_family, SOCK_DGRAM, 0);
 
     ngx_log_debug1(NGX_LOG_DEBUG_EVENT, &rec->log, 0, "UDP socket %d", s);
@@ -4473,6 +4663,7 @@ ngx_udp_connect(ngx_resolver_connection_t *rec)
         return NGX_ERROR;
     }
 
+    //获取一条连接
     c = ngx_get_connection(s, &rec->log);
 
     if (c == NULL) {
@@ -4484,6 +4675,7 @@ ngx_udp_connect(ngx_resolver_connection_t *rec)
         return NGX_ERROR;
     }
 
+    //设置非阻塞
     if (ngx_nonblocking(s) == -1) {
         ngx_log_error(NGX_LOG_ALERT, &rec->log, ngx_socket_errno,
                       ngx_nonblocking_n " failed");
@@ -4499,6 +4691,7 @@ ngx_udp_connect(ngx_resolver_connection_t *rec)
 
     rec->udp = c;
 
+    //设置连接ID
     c->number = ngx_atomic_fetch_add(ngx_connection_counter, 1);
 
     c->start_time = ngx_current_msec;
@@ -4506,6 +4699,7 @@ ngx_udp_connect(ngx_resolver_connection_t *rec)
     ngx_log_debug3(NGX_LOG_DEBUG_EVENT, &rec->log, 0,
                    "connect to %V, fd:%d #%uA", &rec->server, s, c->number);
 
+    //连接
     rc = connect(s, rec->sockaddr, rec->socklen);
 
     /* TODO: iocp */
@@ -4525,6 +4719,7 @@ ngx_udp_connect(ngx_resolver_connection_t *rec)
                 /* select, poll, /dev/poll */       NGX_LEVEL_EVENT;
                 /* eventport event type has no meaning: oneshot only */
 
+    //添加读事件监听
     if (ngx_add_event(rev, NGX_READ_EVENT, event) != NGX_OK) {
         goto failed;
     }
@@ -4540,6 +4735,9 @@ failed:
 }
 
 
+/**
+ * 建立tcp连接
+ */
 static ngx_int_t
 ngx_tcp_connect(ngx_resolver_connection_t *rec)
 {
@@ -4551,6 +4749,7 @@ ngx_tcp_connect(ngx_resolver_connection_t *rec)
     ngx_event_t       *rev, *wev;
     ngx_connection_t  *c;
 
+    //创建socket
     s = ngx_socket(rec->sockaddr->sa_family, SOCK_STREAM, 0);
 
     ngx_log_debug1(NGX_LOG_DEBUG_EVENT, &rec->log, 0, "TCP socket %d", s);
@@ -4561,6 +4760,7 @@ ngx_tcp_connect(ngx_resolver_connection_t *rec)
         return NGX_ERROR;
     }
 
+    //获取一条连接
     c = ngx_get_connection(s, &rec->log);
 
     if (c == NULL) {
@@ -4572,6 +4772,7 @@ ngx_tcp_connect(ngx_resolver_connection_t *rec)
         return NGX_ERROR;
     }
 
+    //设置非阻塞
     if (ngx_nonblocking(s) == -1) {
         ngx_log_error(NGX_LOG_ALERT, &rec->log, ngx_socket_errno,
                       ngx_nonblocking_n " failed");
@@ -4587,6 +4788,7 @@ ngx_tcp_connect(ngx_resolver_connection_t *rec)
 
     rec->tcp = c;
 
+    //连接编号
     c->number = ngx_atomic_fetch_add(ngx_connection_counter, 1);
 
     c->start_time = ngx_current_msec;
@@ -4600,6 +4802,7 @@ ngx_tcp_connect(ngx_resolver_connection_t *rec)
     ngx_log_debug3(NGX_LOG_DEBUG_EVENT, &rec->log, 0,
                    "connect to %V, fd:%d #%uA", &rec->server, s, c->number);
 
+    //发起连接
     rc = connect(s, rec->sockaddr, rec->socklen);
 
     if (rc == -1) {
@@ -4695,6 +4898,7 @@ ngx_tcp_connect(ngx_resolver_connection_t *rec)
         event = NGX_LEVEL_EVENT;
     }
 
+    //添加事件监听
     if (ngx_add_event(rev, NGX_READ_EVENT, event) != NGX_OK) {
         goto failed;
     }

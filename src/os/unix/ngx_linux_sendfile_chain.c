@@ -46,18 +46,35 @@ static void ngx_linux_sendfile_thread_handler(void *data, ngx_log_t *log);
 #define NGX_SENDFILE_MAXSIZE  2147483647L
 
 
+/**
+ * ngx_http_write_filter会调用c->send_chain往客户端发送数据，c->send_chain的取值在不同操作系统，
+ * 编译选项以及协议下（https下用的是ngx_ssl_send_chain）会取不同的函数，典型的linux操作系统下，
+ * 它的取值为 ngx_linux_sendfile_chain，也就是最终会调用这个函数来发送数据。
+ * 
+ * c:当前连接
+ * in:所需要发送的chain
+ * limit:是所能发送的最大值
+ * 
+ * 遍历in, 对于每个buf, in file使用sendfile,in memory使用writev.
+ * 
+ */
 ngx_chain_t *
 ngx_linux_sendfile_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
 {
     int            tcp_nodelay;
+    //send表示将要发送的buf已经已经发送的大小；
+    //prev_send表示上一次发送的大小，也就是已经发送的buf的大小；
     off_t          send, prev_send;
+    //sent表示已经发送的buf的大小；
     size_t         file_size, sent;
     ssize_t        n;
     ngx_err_t      err;
     ngx_buf_t     *file;
     ngx_event_t   *wev;
     ngx_chain_t   *cl;
+    //header表示需要是用writev来发送的buf，也就是only in memory的buf；  
     ngx_iovec_t    header;
+    //主要是用于sendfile和writev的参数,上边的header数组保存的就是iovec
     struct iovec   headers[NGX_IOVS_PREALLOCATE];
 
     wev = c->write;
@@ -79,11 +96,13 @@ ngx_linux_sendfile_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
     header.iovs = headers;
     header.nalloc = NGX_IOVS_PREALLOCATE;
 
+    //发送，in file使用sendfile, in memory使用writev.
     for ( ;; ) {
         prev_send = send;
 
         /* create the iovec and coalesce the neighbouring bufs */
 
+        //将in转成ngx_iovec_t结构体
         cl = ngx_output_chain_to_iovec(&header, in, limit - send, c->log);
 
         if (cl == NGX_CHAIN_ERROR) {
@@ -159,11 +178,14 @@ ngx_linux_sendfile_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
 
         /* get the file buf */
 
+        //1.in_file
         if (header.count == 0 && cl && cl->buf->in_file && send < limit) {
+            //得到file
             file = cl->buf;
 
             /* coalesce the neighbouring file bufs */
 
+            //开始合并。
             file_size = (size_t) ngx_chain_coalesce_file(&cl, limit - send);
 
             send += file_size;
@@ -174,6 +196,7 @@ ngx_linux_sendfile_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
             }
 #endif
 
+            //sendfile 发送
             n = ngx_linux_sendfile(c, file, file_size);
 
             if (n == NGX_ERROR) {
@@ -185,9 +208,11 @@ ngx_linux_sendfile_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
                 return in;
             }
 
+            //得到发送的字节数
             sent = (n == NGX_AGAIN) ? 0 : n;
 
         } else {
+            //2. in_memory
             n = ngx_writev(c, &header);
 
             if (n == NGX_ERROR) {
@@ -197,8 +222,10 @@ ngx_linux_sendfile_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
             sent = (n == NGX_AGAIN) ? 0 : n;
         }
 
+        //更新这个连接上已经发送出去的字节数
         c->sent += sent;
 
+        //更新in，也就是开始处理下一个chain
         in = ngx_chain_update_sent(in, sent);
 
         if (n == NGX_AGAIN) {

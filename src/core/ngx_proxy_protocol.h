@@ -17,11 +17,15 @@
 #define NGX_PROXY_PROTOCOL_MAX_HEADER     4096
 
 
+/**
+ * proxy protocol header
+ * 从连接中读取并解析出来的
+ */
 struct ngx_proxy_protocol_s {
-    ngx_str_t           src_addr;
-    ngx_str_t           dst_addr;
-    in_port_t           src_port;
-    in_port_t           dst_port;
+    ngx_str_t           src_addr;       //源地址
+    ngx_str_t           dst_addr;       //目的地址
+    in_port_t           src_port;       //源端口
+    in_port_t           dst_port;       //目的端口
     ngx_str_t           tlvs;
 };
 

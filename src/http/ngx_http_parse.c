@@ -100,10 +100,19 @@ static uint32_t  usual[] = {
 
 /* gcc, icc, msvc and others compile these switches as an jump table */
 
+/**
+ * 将使用状态机解析请求行
+ * 返回值：
+ * 1. 返回NGX_OK表示成功地解析到完整的HTTP请求行
+ * 2. 返回NGX_AGAIN表示目前接收到的字符流不足以构成完成的请求行，还需要接收更多的字符流
+ * 3. 返回NGX_HTTP_PARSE_INVALID_REQUEST或者NGX_HTTP_PARSE_INVALID_09_METHOD等其他值时表示接收到非法的请求行
+ */
 ngx_int_t
 ngx_http_parse_request_line(ngx_http_request_t *r, ngx_buf_t *b)
 {
     u_char  c, ch, *p, *m;
+    //uri 的完整格式 <scheme>://<user>:<password>@<host>:<port>/<path>;<params>?<query>#<frag>
+    //解析request_line的状态机
     enum {
         sw_start = 0,
         sw_method,
@@ -143,22 +152,28 @@ ngx_http_parse_request_line(ngx_http_request_t *r, ngx_buf_t *b)
         case sw_start:
             r->request_start = p;
 
+            //如果是回车换行则跳出switch，然后继续解析
             if (ch == CR || ch == LF) {
                 break;
             }
 
+            //不是A到Z的字母(大小写敏感的),并且不是_则返回错误
             if ((ch < 'A' || ch > 'Z') && ch != '_' && ch != '-') {
                 return NGX_HTTP_PARSE_INVALID_METHOD;
             }
 
+            //到达这里说明下一步该解析方法了。因此下一个状态就是method
             state = sw_method;
             break;
 
         case sw_method:
+            ///如果再次读到空格则说明我们已经准备解析request-URL，此时已经能得到请求方法了
             if (ch == ' ') {
                 r->method_end = p - 1;
+                //开始位置前面已经保存。
                 m = r->request_start;
 
+                //得到方法的长度，通过长度来得到具体不同的方法，然后给request的method赋值
                 switch (p - m) {
 
                 case 3:
@@ -269,6 +284,7 @@ ngx_http_parse_request_line(ngx_http_request_t *r, ngx_buf_t *b)
                     break;
                 }
 
+                //下一个状态准备开始解析URI
                 state = sw_spaces_before_uri;
                 break;
             }
@@ -281,9 +297,11 @@ ngx_http_parse_request_line(ngx_http_request_t *r, ngx_buf_t *b)
 
         /* space* before URI */
         case sw_spaces_before_uri:
+        //这里由于uri会有两种情况，一种是带schema的，一种是直接相对路径的
 
             if (ch == '/') {
                 r->uri_start = p;
+                //如果是以/开始，则进入sw_after_slash_in_uri
                 state = sw_after_slash_in_uri;
                 break;
             }
@@ -291,12 +309,14 @@ ngx_http_parse_request_line(ngx_http_request_t *r, ngx_buf_t *b)
             c = (u_char) (ch | 0x20);
             if (c >= 'a' && c <= 'z') {
                 r->schema_start = p;
+                //如果是字母，则进入sw_schema处理
                 state = sw_schema;
                 break;
             }
 
             switch (ch) {
             case ' ':
+                //空格的话继续这个状态。
                 break;
             default:
                 return NGX_HTTP_PARSE_INVALID_REQUEST;
@@ -304,8 +324,10 @@ ngx_http_parse_request_line(ngx_http_request_t *r, ngx_buf_t *b)
             break;
 
         case sw_schema:
+        //sw_schema状态主要是用来解析协议类型
 
             c = (u_char) (ch | 0x20);
+            //如果是字母则break，然后继续这个状态的处理。
             if (c >= 'a' && c <= 'z') {
                 break;
             }
@@ -315,9 +337,13 @@ ngx_http_parse_request_line(ngx_http_request_t *r, ngx_buf_t *b)
                 break;
             }
 
+            //到这里说明schema已经结束。
             switch (ch) {
+                //这里必须是: ，如果不是冒号则直接返回错误。
             case ':':
+                //设置schema_end,而start在上面已经设置过了
                 r->schema_end = p;
+                //设置下一个状态。
                 state = sw_schema_slash;
                 break;
             default:
@@ -328,6 +354,7 @@ ngx_http_parse_request_line(ngx_http_request_t *r, ngx_buf_t *b)
         case sw_schema_slash:
             switch (ch) {
             case '/':
+            //得到第一个/
                 state = sw_schema_slash_slash;
                 break;
             default:
@@ -338,6 +365,7 @@ ngx_http_parse_request_line(ngx_http_request_t *r, ngx_buf_t *b)
         case sw_schema_slash_slash:
             switch (ch) {
             case '/':
+                //得到第二个/
                 state = sw_host_start;
                 break;
             default:
@@ -347,6 +375,7 @@ ngx_http_parse_request_line(ngx_http_request_t *r, ngx_buf_t *b)
 
         case sw_host_start:
 
+            //设置host的开始指针
             r->host_start = p;
 
             if (ch == '[') {
@@ -359,6 +388,7 @@ ngx_http_parse_request_line(ngx_http_request_t *r, ngx_buf_t *b)
             /* fall through */
 
         case sw_host:
+        //这个状态用来解析host。
 
             c = (u_char) (ch | 0x20);
             if (c >= 'a' && c <= 'z') {
@@ -373,23 +403,28 @@ ngx_http_parse_request_line(ngx_http_request_t *r, ngx_buf_t *b)
 
         case sw_host_end:
 
+            //到达这里说明host已经得到，因此设置end指针。
             r->host_end = p;
 
             switch (ch) {
             case ':':
+                //冒号说明host有跟端口的，因此进入port状态。
                 state = sw_port;
                 break;
             case '/':
+                //这个说明要开始解析path了。因此设置uri的start，然后进入slash_in_uri
                 r->uri_start = p;
                 state = sw_after_slash_in_uri;
                 break;
             case '?':
+                //开始解析args了
                 r->uri_start = p;
                 r->args_start = p + 1;
                 r->empty_path_in_uri = 1;
                 state = sw_uri;
                 break;
             case ' ':
+                //如果是空格，则设置uri的start和end然后进入http_09
                 /*
                  * use single "/" from request line to preserve pointers,
                  * if request line will be copied to large client buffer
@@ -445,12 +480,14 @@ ngx_http_parse_request_line(ngx_http_request_t *r, ngx_buf_t *b)
             break;
 
         case sw_port:
+            //用来解析协议端口
             if (ch >= '0' && ch <= '9') {
                 break;
             }
 
             switch (ch) {
             case '/':
+                //如果到达这里说明端口解析完毕， 然后就来判断下一步需要的状态。
                 r->uri_start = p;
                 state = sw_after_slash_in_uri;
                 break;
@@ -461,6 +498,7 @@ ngx_http_parse_request_line(ngx_http_request_t *r, ngx_buf_t *b)
                 state = sw_uri;
                 break;
             case ' ':
+            //如果是空格则设置port end，并进入http_09状态。
                 /*
                  * use single "/" from request line to preserve pointers,
                  * if request line will be copied to large client buffer
@@ -519,6 +557,7 @@ ngx_http_parse_request_line(ngx_http_request_t *r, ngx_buf_t *b)
                 state = sw_uri;
                 break;
             case '#':
+                //要对段进行解析。因此设置complex uri
                 r->complex_uri = 1;
                 state = sw_uri;
                 break;
@@ -770,6 +809,7 @@ ngx_http_parse_request_line(ngx_http_request_t *r, ngx_buf_t *b)
                 state = sw_almost_done;
                 break;
             case LF:
+                //如果是换行则说明request-line解析完毕
                 goto done;
             default:
                 return NGX_HTTP_PARSE_INVALID_REQUEST;
@@ -812,12 +852,23 @@ done:
 }
 
 
+/**
+ * 解析header_in缓冲区中的请求头，这个函数一次只能解析一个header
+ * 
+ * 返回NGX_OK时，表示解析出一行HTTP头部
+ * 返回NGX_HTTP_PARSE_HEADER_DONE时，表示已经解析出了完整的HTTP头部，这时可以准备开始处理HTTP请求了
+ * 返回NGX_AGAIN时，表示还需要接收到更多的字符流才能继续解析，
+ * 除此之外的错误情况 如NGX_HTTP_PARSE_INVALID_HEADER表示解析请求头失败，返回400错误
+ * 
+ * allow_underscores: 请求头中是否允许下划线
+ */
 ngx_int_t
 ngx_http_parse_header_line(ngx_http_request_t *r, ngx_buf_t *b,
     ngx_uint_t allow_underscores)
 {
     u_char      c, ch, *p;
     ngx_uint_t  hash, i;
+    //解析header的状态机
     enum {
         sw_start = 0,
         sw_name,
@@ -852,30 +903,39 @@ ngx_http_parse_header_line(ngx_http_request_t *r, ngx_buf_t *b,
 
         /* first char */
         case sw_start:
+            // 设置header开始指针。
             r->header_name_start = p;
             r->invalid_header = 0;
 
             switch (ch) {
+                //通过第一个字符的值来判断下一个状态
             case CR:
+                //回车的话，说明没有header，因此设置状态为almost_done，然后期待最后的换行
                 r->header_end = p;
                 state = sw_header_almost_done;
                 break;
             case LF:
+                //如果换行则直接进入header_done,也就是整个header解析完毕
                 r->header_end = p;
                 goto header_done;
             default:
+                //默认进入sw_name状态，进行name解析
                 state = sw_name;
 
+                //这里做了一个表，来进行大小写转换
                 c = lowcase[ch];
 
                 if (c) {
+                    //得到hash值，然后设置lowcase_header
                     hash = ngx_hash(0, c);
                     r->lowcase_header[0] = c;
                     i = 1;
                     break;
                 }
 
+                //如果存在下划线，则通过传递进来的参数来判断是否允许下划线。
                 if (ch == '_') {
+                    //下划线处理
                     if (allow_underscores) {
                         hash = ngx_hash(0, ch);
                         r->lowcase_header[0] = ch;
@@ -884,6 +944,7 @@ ngx_http_parse_header_line(ngx_http_request_t *r, ngx_buf_t *b,
                     } else {
                         hash = 0;
                         i = 0;
+                        //不允许出现下划线，置位无效
                         r->invalid_header = 1;
                     }
 
@@ -928,12 +989,14 @@ ngx_http_parse_header_line(ngx_http_request_t *r, ngx_buf_t *b,
                 break;
             }
 
+            //如果是冒号，则进入value的处理，由于value有可能前面有空格，因此先处理这个
             if (ch == ':') {
                 r->header_name_end = p;
                 state = sw_space_before_value;
                 break;
             }
 
+            //如果是回车换行则说明当前header解析已经结束，因此进入最终结束处理。
             if (ch == CR) {
                 r->header_name_end = p;
                 r->header_start = p;
@@ -943,6 +1006,7 @@ ngx_http_parse_header_line(ngx_http_request_t *r, ngx_buf_t *b,
             }
 
             if (ch == LF) {
+                //设置对应的值，然后进入done
                 r->header_name_end = p;
                 r->header_start = p;
                 r->header_end = p;
@@ -972,8 +1036,10 @@ ngx_http_parse_header_line(ngx_http_request_t *r, ngx_buf_t *b,
         case sw_space_before_value:
             switch (ch) {
             case ' ':
+                //跳过空格
                 break;
             case CR:
+                //设置header_start也就是value的开始指针
                 r->header_start = p;
                 r->header_end = p;
                 state = sw_almost_done;
@@ -996,6 +1062,7 @@ ngx_http_parse_header_line(ngx_http_request_t *r, ngx_buf_t *b,
         case sw_value:
             switch (ch) {
             case ' ':
+                //如果是空格则进入sw_space_after_value处理
                 r->header_end = p;
                 state = sw_space_after_value;
                 break;
@@ -1018,6 +1085,7 @@ ngx_http_parse_header_line(ngx_http_request_t *r, ngx_buf_t *b,
             case ' ':
                 break;
             case CR:
+            //回车换行的话，说明header解析完毕进入done或者almost_done.也就是最终会返回NGX_OK
                 state = sw_almost_done;
                 break;
             case LF:
@@ -1065,6 +1133,8 @@ ngx_http_parse_header_line(ngx_http_request_t *r, ngx_buf_t *b,
         }
     }
 
+    //当遍历完buf后，header仍然没有结束的情况
+    //此时设置对应的hash值，以及保存当前状态，以及buf的位置
     b->pos = p;
     r->state = state;
     r->header_hash = hash;
@@ -1074,6 +1144,7 @@ ngx_http_parse_header_line(ngx_http_request_t *r, ngx_buf_t *b,
 
 done:
 
+    //当前的header已经解析完毕，此时设置状态为start，以及buf位置为p+1.
     b->pos = p + 1;
     r->state = sw_start;
     r->header_hash = hash;
@@ -1082,6 +1153,7 @@ done:
     return NGX_OK;
 
 header_done:
+    //header全部解析完毕，此时是得到了最后的回车换行，因此不需要hash值
 
     b->pos = p + 1;
     r->state = sw_start;
@@ -1617,6 +1689,14 @@ args:
 }
 
 
+/**
+ * 解析响应状态行
+ * 
+ * 返回值：
+ *  NGX_OK：表示状态行解析成功。
+ *  NGX_AGAIN：意味着当前缓冲区的数据不够，需要更多数据才能完成解析。
+ *  NGX_ERROR：说明状态行格式有误。
+ */
 ngx_int_t
 ngx_http_parse_status_line(ngx_http_request_t *r, ngx_buf_t *b,
     ngx_http_status_t *status)
@@ -1835,6 +1915,9 @@ done:
 }
 
 
+/**
+ * 可以解析不安全的uri,如包含../
+ */
 ngx_int_t
 ngx_http_parse_unsafe_uri(ngx_http_request_t *r, ngx_str_t *uri,
     ngx_str_t *args, ngx_uint_t *flags)
@@ -2027,6 +2110,13 @@ ngx_http_parse_multi_header_lines(ngx_http_request_t *r,
 }
 
 
+/**
+ * 从Set-Cookie头部链表中解析出指定cookie的值
+ *  headers: Set-Cookie头部链表
+ *  name: cookie名
+ *  value: cookie值
+ *  返回值：ngx_table_elt_t*，如果没有找到则返回NULL
+ */
 ngx_table_elt_t *
 ngx_http_parse_set_cookie_lines(ngx_http_request_t *r,
     ngx_table_elt_t *headers, ngx_str_t *name, ngx_str_t *value)
@@ -2034,6 +2124,7 @@ ngx_http_parse_set_cookie_lines(ngx_http_request_t *r,
     u_char           *start, *last, *end;
     ngx_table_elt_t  *h;
 
+    //遍历headers链表
     for (h = headers; h; h = h->next) {
 
         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -2046,25 +2137,31 @@ ngx_http_parse_set_cookie_lines(ngx_http_request_t *r,
         start = h->value.data;
         end = h->value.data + h->value.len;
 
+        //比较name
         if (ngx_strncasecmp(start, name->data, name->len) != 0) {
             continue;
         }
 
+        //如果name匹配成功 xxx = yyy, 此处跳过=前边的空格
         for (start += name->len; start < end && *start == ' '; start++) {
             /* void */
         }
 
+        //如果下一个字符不是=，是非法的格式
         if (start == end || *start++ != '=') {
             /* the invalid header value */
             continue;
         }
 
+        //忽略掉=后边的空格
         while (start < end && *start == ' ') { start++; }
 
+        //找到下一个分号
         for (last = start; last < end && *last != ';'; last++) {
             /* void */
         }
 
+        //返回值
         value->len = last - start;
         value->data = start;
 
@@ -2075,18 +2172,25 @@ ngx_http_parse_set_cookie_lines(ngx_http_request_t *r,
 }
 
 
+/**
+ * 获取arg参数
+ *  name: arg参数名， 如：a
+ *  len: arg参数名长度
+ *  value: 出参， 参数值
+ */
 ngx_int_t
 ngx_http_arg(ngx_http_request_t *r, u_char *name, size_t len, ngx_str_t *value)
 {
     u_char  *p, *last;
 
-    if (r->args.len == 0) {
+    if (r->args.len == 0) {     //如果没有args参数
         return NGX_DECLINED;
     }
 
     p = r->args.data;
     last = p + r->args.len;
 
+    //遍历r->args整个参数
     for ( /* void */ ; p < last; p++) {
 
         /* we need '=' after name, so drop one char from last */
@@ -2097,6 +2201,7 @@ ngx_http_arg(ngx_http_request_t *r, u_char *name, size_t len, ngx_str_t *value)
             return NGX_DECLINED;
         }
 
+        //(p 为args参数开头或 p的前一位为&) 且p+len 为'='
         if ((p == r->args.data || *(p - 1) == '&') && *(p + len) == '=') {
 
             value->data = p + len + 1;
@@ -2138,6 +2243,11 @@ ngx_http_split_args(ngx_http_request_t *r, ngx_str_t *uri, ngx_str_t *args)
 }
 
 
+/**
+ * ngx_http_proxy_chunked_filter->.
+ * 
+ * 解析chunked协议的内容
+ */
 ngx_int_t
 ngx_http_parse_chunked(ngx_http_request_t *r, ngx_buf_t *b,
     ngx_http_chunked_t *ctx, ngx_uint_t keep_trailers)

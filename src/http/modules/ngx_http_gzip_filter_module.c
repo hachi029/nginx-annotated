@@ -12,38 +12,65 @@
 #include <zlib.h>
 
 
+/**
+ * 本模块loc级别的配置结构体
+ */
 typedef struct {
+    //gzip on | off; 配置指令
     ngx_flag_t           enable;
+    //gzip_no_buffer 配置指令
+    //默认情况下，在将数据发送到客户端之前nginx会等待，直到至少一个缓存（有gzip_buffers定义）被数据填满。如果开启该指令，那会禁用缓存。
     ngx_flag_t           no_buffer;
 
+    //在merge_loc_conf阶段，由types_keys生成的hash表，key为mime-type， value为固定值 4
     ngx_hash_t           types;
 
+    //gzip_buffers number size; 配置指令值
     ngx_bufs_t           bufs;
 
+    //postpone_gzipping 配置指令值
+    //在开始进行gzip压缩前定义一个最小的数据门槛（threshold）
     size_t               postpone_gzipping;
+    //gzip_comp_level level; 配置指令值，压缩级别
     ngx_int_t            level;
+    //gzip_window 配置指令值
+    // 该指令用于gzip操作的窗口（window）缓冲的大小（windowBits参数）。该指令所使用的值是由zlib库调用的功能
     size_t               wbits;
+    //gzip_hash 配置指令值,  压缩分配内存情况，取值1-9， 默认为8
+    //该指令用于设置分配给内部压缩状态（memlevel参数）的内存总数。该指令所使用的值是有Zlib库调用的功能。
     size_t               memlevel;
+    //gzip_min_length 配置指令, 压缩最小长度阈值，默认20字节。
     ssize_t              min_length;
 
+    //	gzip_types mime-type ...; 配置指令, 压缩类型 默认text/html
     ngx_array_t         *types_keys;
 } ngx_http_gzip_conf_t;
 
 
+/**
+ * 本模块的上下文结构体
+ */
 typedef struct {
+    //存放的是输入，即未压缩数据
     ngx_chain_t         *in;
     ngx_chain_t         *free;
     ngx_chain_t         *busy;
+    //out 输出，已经压缩后的结果
     ngx_chain_t         *out;
     ngx_chain_t        **last_out;
 
+    // 已经添加到要压缩的数据
     ngx_chain_t         *copied;
     ngx_chain_t         *copy_buf;
 
+    //输入buf, zlib从这里读取需要压缩的数据
     ngx_buf_t           *in_buf;
+    //输出buf, zlib压缩后，将数据输出到这里,已经使用的buf
     ngx_buf_t           *out_buf;
+    //已经使用的buf数量 ctx->bufs < conf->bufs.num
     ngx_int_t            bufs;
 
+    //ctx->preallocated = ngx_palloc(r->pool, ctx->allocated);  长度为allocated的内存
     void                *preallocated;
     char                *free_mem;
     ngx_uint_t           allocated;
@@ -54,15 +81,39 @@ typedef struct {
     unsigned             flush:4;
     unsigned             redo:1;
     unsigned             done:1;
+    //标识没有可用内存了( ctx->bufs < conf->bufs.num )
     unsigned             nomem:1;
+    //postpone_gzipping 配置指令的值 ( ctx->buffering = (conf->postpone_gzipping != 0); )
     unsigned             buffering:1;
     unsigned             zlib_ng:1;
     unsigned             state_allocated:1;
 
+    //压缩前的数据大小
     size_t               zin;
+    //压缩后的数据大小
     size_t               zout;
 
+    //gzip实现结构体
+    /**
+     * typedef struct z_stream_s {
+        z_const Bytef       *next_in;                // 将要压缩数据的首地址
+        uInt                 avail_in;               // 将要压缩数据的长度
+        uLong               total_in;                // 将要压缩数据缓冲区的长度
+        Bytef               *next_out;               // 压缩后数据保存位置。
+        uInt                 avail_out;              // 压缩后数据的长度
+        uLong               total_out;               // 压缩后数据缓冲区的大小
+        z_const char        *msg;                    // 存放最近的错误信息，NULL表示没有错误
+        struct internal_state FAR *state; 
+        alloc_func        zalloc;  
+        free_func         zfree;   
+        voidpf            opaque; 
+        int               data_type;                // 表示数据类型，文本或者二进制
+        uLong             adler;     
+        uLong             reserved;   
+    }  z_stream;
+     */
     z_stream             zstream;
+    //当前请求
     ngx_http_request_t  *request;
 } ngx_http_gzip_ctx_t;
 
@@ -108,9 +159,15 @@ static ngx_conf_post_handler_pt  ngx_http_gzip_window_p = ngx_http_gzip_window;
 static ngx_conf_post_handler_pt  ngx_http_gzip_hash_p = ngx_http_gzip_hash;
 
 
+/**
+ *  gzip 开启和关闭压缩。
+ *  gzip_types 哪些类型会压缩， 检测content-type。
+ *  gzip_comp_level 压缩比例。
+ *  gzip_min_length 非chunked，长度阈值。content-length 大于这个阈值压缩。否则不压缩。
+ */
 static ngx_command_t  ngx_http_gzip_filter_commands[] = {
 
-    { ngx_string("gzip"),
+    { ngx_string("gzip"),       //Enables or disables gzipping of responses.
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_HTTP_LIF_CONF
                         |NGX_CONF_FLAG,
       ngx_conf_set_flag_slot,
@@ -118,21 +175,21 @@ static ngx_command_t  ngx_http_gzip_filter_commands[] = {
       offsetof(ngx_http_gzip_conf_t, enable),
       NULL },
 
-    { ngx_string("gzip_buffers"),
+    { ngx_string("gzip_buffers"),   //Sets the number and size of buffers used to compress a response
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE2,
       ngx_conf_set_bufs_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_gzip_conf_t, bufs),
       NULL },
 
-    { ngx_string("gzip_types"),
+    { ngx_string("gzip_types"), //	gzip_types mime-type ...;
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
       ngx_http_types_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_gzip_conf_t, types_keys),
       &ngx_http_html_default_types[0] },
 
-    { ngx_string("gzip_comp_level"),
+    { ngx_string("gzip_comp_level"), //compress level
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
       ngx_conf_set_num_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
@@ -167,7 +224,7 @@ static ngx_command_t  ngx_http_gzip_filter_commands[] = {
       offsetof(ngx_http_gzip_conf_t, no_buffer),
       NULL },
 
-    { ngx_string("gzip_min_length"),
+    { ngx_string("gzip_min_length"), //Sets the minimum length of a response that will be gzipped
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
       ngx_conf_set_size_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
@@ -178,8 +235,15 @@ static ngx_command_t  ngx_http_gzip_filter_commands[] = {
 };
 
 
+/**
+ * https://nginx.org/en/docs/http/ngx_http_gzip_module.html
+ * 
+ * 使用gzip压缩响应
+ * 
+ */
 static ngx_http_module_t  ngx_http_gzip_filter_module_ctx = {
     ngx_http_gzip_add_variables,           /* preconfiguration */
+    //安装headerfilter和body_filter
     ngx_http_gzip_filter_init,             /* postconfiguration */
 
     NULL,                                  /* create main configuration */
@@ -217,6 +281,9 @@ static ngx_http_output_body_filter_pt    ngx_http_next_body_filter;
 static ngx_uint_t  ngx_http_gzip_assume_zlib_ng;
 
 
+/**
+ * 本模块的header_filter
+ */
 static ngx_int_t
 ngx_http_gzip_header_filter(ngx_http_request_t *r)
 {
@@ -226,15 +293,16 @@ ngx_http_gzip_header_filter(ngx_http_request_t *r)
 
     conf = ngx_http_get_module_loc_conf(r, ngx_http_gzip_filter_module);
 
-    if (!conf->enable
-        || (r->headers_out.status != NGX_HTTP_OK
+    //以下几种情况，不进行压缩
+    if (!conf->enable                                           //未启用
+        || (r->headers_out.status != NGX_HTTP_OK                //status 不为(200,403,404)
             && r->headers_out.status != NGX_HTTP_FORBIDDEN
             && r->headers_out.status != NGX_HTTP_NOT_FOUND)
-        || (r->headers_out.content_encoding
+        || (r->headers_out.content_encoding                     // content_encoding 响应头不为空
             && r->headers_out.content_encoding->value.len)
-        || (r->headers_out.content_length_n != -1
+        || (r->headers_out.content_length_n != -1               //content_length_n小于 conf->min_length
             && r->headers_out.content_length_n < conf->min_length)
-        || ngx_http_test_content_type(r, &conf->types) == NULL
+        || ngx_http_test_content_type(r, &conf->types) == NULL  //content_type未命中配置指令 gzip_types mime-type ...;
         || r->header_only)
     {
         return ngx_http_next_header_filter(r);
@@ -254,27 +322,33 @@ ngx_http_gzip_header_filter(ngx_http_request_t *r)
     }
 #endif
 
+    //根据请求头accept-encoding判断是否可以对响应体进行压缩
     if (!r->gzip_tested) {
         if (ngx_http_gzip_ok(r) != NGX_OK) {
             return ngx_http_next_header_filter(r);
         }
 
-    } else if (!r->gzip_ok) {
+    } else if (!r->gzip_ok) {       //不能压缩，直接返回
         return ngx_http_next_header_filter(r);
     }
 
+    //创建模块上下文结构体
     ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_gzip_ctx_t));
     if (ctx == NULL) {
         return NGX_ERROR;
     }
 
+    //保存模块上下文结构体
     ngx_http_set_ctx(r, ctx, ngx_http_gzip_filter_module);
 
+    //保存当前请求
     ctx->request = r;
     ctx->buffering = (conf->postpone_gzipping != 0);
 
+    //初始化 ctx->wbits / ctx->memlevel / ctx->allocated / ctx->zlib_ng
     ngx_http_gzip_filter_memory(r, ctx);
 
+    //增加响应头 Content-Encoding: gzip
     h = ngx_list_push(&r->headers_out.headers);
     if (h == NULL) {
         return NGX_ERROR;
@@ -286,9 +360,12 @@ ngx_http_gzip_header_filter(ngx_http_request_t *r)
     ngx_str_set(&h->value, "gzip");
     r->headers_out.content_encoding = h;
 
+    //设置 main_filter_need_in_memory
     r->main_filter_need_in_memory = 1;
 
+    // 移除 content_length 响应头
     ngx_http_clear_content_length(r);
+    // 移除 accept_ranges 响应头
     ngx_http_clear_accept_ranges(r);
     ngx_http_weak_etag(r);
 
@@ -296,6 +373,9 @@ ngx_http_gzip_header_filter(ngx_http_request_t *r)
 }
 
 
+/**
+ * 本模块的body_filter
+ */
 static ngx_int_t
 ngx_http_gzip_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
@@ -304,8 +384,10 @@ ngx_http_gzip_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     ngx_chain_t          *cl;
     ngx_http_gzip_ctx_t  *ctx;
 
+    //获取模块上下文结构体(在header_filter中，决定进行gzip压缩后，创建 )
     ctx = ngx_http_get_module_ctx(r, ngx_http_gzip_filter_module);
 
+    //如果ctx为NULL 或 已经压缩完成 或 header请求， 不进行任何处理，直接返回
     if (ctx == NULL || ctx->done || r->header_only) {
         return ngx_http_next_body_filter(r, in);
     }
@@ -343,13 +425,16 @@ ngx_http_gzip_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         }
     }
 
+    //首次调用body_filter，此字段为NULL
     if (ctx->preallocated == NULL) {
+        //初始化 ctx->preallocated / ctx->zstream
         if (ngx_http_gzip_filter_deflate_start(r, ctx) != NGX_OK) {
             goto failed;
         }
     }
 
     if (in) {
+        //将in拷贝到ctx->in
         if (ngx_chain_add_copy(r->pool, &ctx->in, in) != NGX_OK) {
             goto failed;
         }
@@ -357,6 +442,7 @@ ngx_http_gzip_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         r->connection->buffered |= NGX_HTTP_GZIP_BUFFERED;
     }
 
+    //如果缓冲区已用完
     if (ctx->nomem) {
 
         /* flush busy buffers */
@@ -384,6 +470,7 @@ ngx_http_gzip_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
             /* cycle while there is data to feed zlib and ... */
 
+             //将ctx->in 上的第一个buf挂到 ctx->zstream.next_in 链表上
             rc = ngx_http_gzip_filter_add_data(r, ctx);
 
             if (rc == NGX_DECLINED) {
@@ -397,8 +484,11 @@ ngx_http_gzip_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
             /* ... there are buffers to write zlib output */
 
+            // 分配保存压缩后的数据的内存
+            //获取一个 ngx_buf_t, 设置到 ctx->out_buf。同时将 ctx->zstream.next_out 指向新获取到的ngx_buf
             rc = ngx_http_gzip_filter_get_buf(r, ctx);
 
+            //没有内存了，会返回 NGX_DECLINED
             if (rc == NGX_DECLINED) {
                 break;
             }
@@ -408,6 +498,7 @@ ngx_http_gzip_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
             }
 
 
+            //对数据进行压缩
             rc = ngx_http_gzip_filter_deflate(r, ctx);
 
             if (rc == NGX_OK) {
@@ -433,6 +524,7 @@ ngx_http_gzip_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
             goto failed;
         }
 
+        //释放ctx->copied 缓存区链表
         ngx_http_gzip_filter_free_copy_buf(r, ctx);
 
         ngx_chain_update_chains(r->pool, &ctx->free, &ctx->busy, &ctx->out,
@@ -465,12 +557,16 @@ failed:
 }
 
 
+/**
+ * 初始化 ctx->wbits / ctx->memlevel / ctx->allocated / ctx->zlib_ng
+ */
 static void
 ngx_http_gzip_filter_memory(ngx_http_request_t *r, ngx_http_gzip_ctx_t *ctx)
 {
     int                    wbits, memlevel;
     ngx_http_gzip_conf_t  *conf;
 
+    //获取loc配置结构体
     conf = ngx_http_get_module_loc_conf(r, ngx_http_gzip_filter_module);
 
     wbits = conf->wbits;
@@ -603,6 +699,11 @@ ngx_http_gzip_filter_buffer(ngx_http_gzip_ctx_t *ctx, ngx_chain_t *in)
 }
 
 
+/**
+ *  进行压缩前的初始化准备工作
+ * 
+ * 初始化 ctx->preallocated / ctx->zstream.
+ */
 static ngx_int_t
 ngx_http_gzip_filter_deflate_start(ngx_http_request_t *r,
     ngx_http_gzip_ctx_t *ctx)
@@ -619,10 +720,20 @@ ngx_http_gzip_filter_deflate_start(ngx_http_request_t *r,
 
     ctx->free_mem = ctx->preallocated;
 
+    // 设置压缩过程中内存分配释放回调函数
     ctx->zstream.zalloc = ngx_http_gzip_filter_alloc;
     ctx->zstream.zfree = ngx_http_gzip_filter_free;
     ctx->zstream.opaque = ctx;
 
+    /**
+     * 压缩的初始化 
+     *  strm:   关联的数据结构    
+        level:  压缩级别,压缩级别是一个0-9的数字，0压缩速度最快（压缩的过程），9压缩速度最慢，压缩率最大，0不压缩数
+        method: 压缩的模式，现在只有一种。Z_DEFLATED（表示数字8）
+        windowBits: 表示处理raw deflate的方法。windowBits为8..15，也可以为-8...-15。当值为16时，将会加上一个简单gzip头部和尾部。
+        memLevel:   指定的内部压缩状态，应该分配多少内存。 memLevel=1使用的最小内存，但很慢，降低了压缩比; memLevel=9使用的最大内存以获得最佳的速度。默认值是8。请参阅作为的函数windowBits和memLevel的使用的总内存zconf.h。
+        strategy:   压缩的策略
+     */
     rc = deflateInit2(&ctx->zstream, (int) conf->level, Z_DEFLATED,
                       ctx->wbits + 16, ctx->memlevel, Z_DEFAULT_STRATEGY);
 
@@ -639,6 +750,13 @@ ngx_http_gzip_filter_deflate_start(ngx_http_request_t *r,
 }
 
 
+/**
+ * 将ctx->in上的第一个buf挂到 ctx->zstream.next_in链表上
+ * 返回: 
+ *  NGX_DECLINED: 输入为null
+ *  NGX_AGAIN:
+ *  NGX_OK: 
+ */
 static ngx_int_t
 ngx_http_gzip_filter_add_data(ngx_http_request_t *r, ngx_http_gzip_ctx_t *ctx)
 {
@@ -651,6 +769,7 @@ ngx_http_gzip_filter_add_data(ngx_http_request_t *r, ngx_http_gzip_ctx_t *ctx)
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "gzip in: %p", ctx->in);
 
+    //如果当前输入为空
     if (ctx->in == NULL) {
         return NGX_DECLINED;
     }
@@ -662,11 +781,13 @@ ngx_http_gzip_filter_add_data(ngx_http_request_t *r, ngx_http_gzip_ctx_t *ctx)
          * but postpone free()ing after zlib compressing and data output
          */
 
+        // copied 已经添加到将要压缩的数据
         ctx->copy_buf->next = ctx->copied;
         ctx->copied = ctx->copy_buf;
         ctx->copy_buf = NULL;
     }
 
+    //取出ctx->in的第一个ngx_chain_t cl
     cl = ctx->in;
     ctx->in_buf = cl->buf;
     ctx->in = cl->next;
@@ -678,15 +799,18 @@ ngx_http_gzip_filter_add_data(ngx_http_request_t *r, ngx_http_gzip_ctx_t *ctx)
         ngx_free_chain(r->pool, cl);
     }
 
-    ctx->zstream.next_in = ctx->in_buf->pos;
-    ctx->zstream.avail_in = ctx->in_buf->last - ctx->in_buf->pos;
+    //将ctx->zstream.next_in  设置为 ctx->in_buf
+    ctx->zstream.next_in = ctx->in_buf->pos;    // 将要压缩数据的首地址
+    ctx->zstream.avail_in = ctx->in_buf->last - ctx->in_buf->pos;   // 将要压缩数据的长度
 
     ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "gzip in_buf:%p ni:%p ai:%ud",
                    ctx->in_buf,
                    ctx->zstream.next_in, ctx->zstream.avail_in);
 
+    //如果当前buf是last_buf或 last_in_chain， 则将 ctx->flush置位
     if (ctx->in_buf->last_buf) {
+        // 最后一块内存
         ctx->flush = Z_FINISH;
 
     } else if (ctx->in_buf->flush) {
@@ -701,28 +825,39 @@ ngx_http_gzip_filter_add_data(ngx_http_request_t *r, ngx_http_gzip_ctx_t *ctx)
 }
 
 
+/**
+ * 获取一个ngx_buf_t, 设置到 ctx->out_buf。同时将ctx->zstream.next_out指向新获取到的ngx_buf
+ * 1.尝试从ctx->free中获取空闲的ngx_buf_t;
+ * 2.如果 ctx->bufs < conf->bufs.num， 创建一个新的buf
+ * 3.设置 ctx->nomem = 1;  返回 NGX_DECLINED。
+ * 
+ */
 static ngx_int_t
 ngx_http_gzip_filter_get_buf(ngx_http_request_t *r, ngx_http_gzip_ctx_t *ctx)
 {
     ngx_chain_t           *cl;
     ngx_http_gzip_conf_t  *conf;
 
+    //如果 ctx->zstream.avail_out 不为NULL，直接返回
     if (ctx->zstream.avail_out) {
         return NGX_OK;
     }
 
     conf = ngx_http_get_module_loc_conf(r, ngx_http_gzip_filter_module);
 
+    //1.如果ctx->free上还有空闲的ngx_buf， 则取出一个
     if (ctx->free) {
 
+        //取出首个ngx_chain_t
         cl = ctx->free;
         ctx->out_buf = cl->buf;
         ctx->free = cl->next;
 
         ngx_free_chain(r->pool, cl);
 
-    } else if (ctx->bufs < conf->bufs.num) {
+    } else if (ctx->bufs < conf->bufs.num) {    //2.仍有可用buf
 
+        //创建一个新的buf
         ctx->out_buf = ngx_create_temp_buf(r->pool, conf->bufs.size);
         if (ctx->out_buf == NULL) {
             return NGX_ERROR;
@@ -733,6 +868,7 @@ ngx_http_gzip_filter_get_buf(ngx_http_request_t *r, ngx_http_gzip_ctx_t *ctx)
         ctx->bufs++;
 
     } else {
+        //否则标识 缓冲区已用完
         ctx->nomem = 1;
         return NGX_DECLINED;
     }
@@ -744,6 +880,9 @@ ngx_http_gzip_filter_get_buf(ngx_http_request_t *r, ngx_http_gzip_ctx_t *ctx)
 }
 
 
+/**
+ * 执行压缩，解压缩结果放到 ctx->out_buf
+ */
 static ngx_int_t
 ngx_http_gzip_filter_deflate(ngx_http_request_t *r, ngx_http_gzip_ctx_t *ctx)
 {
@@ -758,8 +897,13 @@ ngx_http_gzip_filter_deflate(ngx_http_request_t *r, ngx_http_gzip_ctx_t *ctx)
                  ctx->zstream.avail_in, ctx->zstream.avail_out,
                  ctx->flush, ctx->redo);
 
+    /**
+     * strm:   关联的数据结构，要压缩的数据、长度、压缩数据的存放位置和可用大小，都在其中设置的
+     * flush:  采用何种方式将压缩的数据写到缓冲区中。
+     */
     rc = deflate(&ctx->zstream, ctx->flush);
 
+    //压缩失败
     if (rc != Z_OK && rc != Z_STREAM_END && rc != Z_BUF_ERROR) {
         ngx_log_error(NGX_LOG_ALERT, r->connection->log, 0,
                       "deflate() failed: %d, %d", ctx->flush, rc);
@@ -776,6 +920,7 @@ ngx_http_gzip_filter_deflate(ngx_http_request_t *r, ngx_http_gzip_ctx_t *ctx)
                    "gzip in_buf:%p pos:%p",
                    ctx->in_buf, ctx->in_buf->pos);
 
+    //
     if (ctx->zstream.next_in) {
         ctx->in_buf->pos = ctx->zstream.next_in;
 
@@ -871,6 +1016,9 @@ ngx_http_gzip_filter_deflate(ngx_http_request_t *r, ngx_http_gzip_ctx_t *ctx)
 }
 
 
+/**
+ * gzip压缩结束
+ */
 static ngx_int_t
 ngx_http_gzip_filter_deflate_end(ngx_http_request_t *r,
     ngx_http_gzip_ctx_t *ctx)
@@ -882,6 +1030,10 @@ ngx_http_gzip_filter_deflate_end(ngx_http_request_t *r,
     ctx->zin = ctx->zstream.total_in;
     ctx->zout = ctx->zstream.total_out;
 
+    /**
+     * 压缩结束
+     *  strm:   关联的数据结构，释放资源
+     */
     rc = deflateEnd(&ctx->zstream);
 
     if (rc != Z_OK) {
@@ -890,6 +1042,7 @@ ngx_http_gzip_filter_deflate_end(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
+    //释放内存 ctx->preallocated
     ngx_pfree(r->pool, ctx->preallocated);
 
     cl = ngx_alloc_chain_link(r->pool);
@@ -921,6 +1074,12 @@ ngx_http_gzip_filter_deflate_end(ngx_http_request_t *r,
 }
 
 
+/**
+ * gzip 压缩过程中使用的内存分配函数
+ * 
+ * ctx->zstream.zalloc = ngx_http_gzip_filter_alloc;
+ * 
+ */
 static void *
 ngx_http_gzip_filter_alloc(void *opaque, u_int items, u_int size)
 {
@@ -971,6 +1130,11 @@ ngx_http_gzip_filter_alloc(void *opaque, u_int items, u_int size)
 }
 
 
+/**
+ * gzip 压缩过程中使用的内存释放函数
+ * 
+ * ctx->zstream.zfree = ngx_http_gzip_filter_free;
+ */
 static void
 ngx_http_gzip_filter_free(void *opaque, void *address)
 {
@@ -983,17 +1147,23 @@ ngx_http_gzip_filter_free(void *opaque, void *address)
 }
 
 
+/**
+ * 释放ctx->copied 缓存区链表
+ */
 static void
 ngx_http_gzip_filter_free_copy_buf(ngx_http_request_t *r,
     ngx_http_gzip_ctx_t *ctx)
 {
     ngx_chain_t  *cl, *ln;
 
+    //遍历 ctx->copied
     for (cl = ctx->copied; cl; /* void */) {
         ln = cl;
         cl = cl->next;
 
+        //释放ngx_buf_t
         ngx_pfree(r->pool, ln->buf->start);
+        //释放ngx_chain_t
         ngx_free_chain(r->pool, ln);
     }
 
@@ -1001,6 +1171,11 @@ ngx_http_gzip_filter_free_copy_buf(ngx_http_request_t *r,
 }
 
 
+/**
+ * preconfiguration
+ * 
+ * 注册变量 $gzip_ratio
+ */
 static ngx_int_t
 ngx_http_gzip_add_variables(ngx_conf_t *cf)
 {
@@ -1017,6 +1192,12 @@ ngx_http_gzip_add_variables(ngx_conf_t *cf)
 }
 
 
+/**
+ * $gzip_ratio 的 get_handler。
+ * 
+ * $gzip_ratio 为原始数据的大小/压缩后的数据大小：(ctx->zin / ctx->zout)
+ * 
+ */
 static ngx_int_t
 ngx_http_gzip_ratio_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data)
@@ -1024,6 +1205,7 @@ ngx_http_gzip_ratio_variable(ngx_http_request_t *r,
     ngx_uint_t            zint, zfrac;
     ngx_http_gzip_ctx_t  *ctx;
 
+    //获取模块上下文结构体
     ctx = ngx_http_get_module_ctx(r, ngx_http_gzip_filter_module);
 
     if (ctx == NULL || ctx->zout == 0) {
@@ -1035,12 +1217,15 @@ ngx_http_gzip_ratio_variable(ngx_http_request_t *r,
     v->no_cacheable = 0;
     v->not_found = 0;
 
+    //申请变量内存
     v->data = ngx_pnalloc(r->pool, NGX_INT32_LEN + 3);
     if (v->data == NULL) {
         return NGX_ERROR;
     }
 
+    //计算整数部分
     zint = (ngx_uint_t) (ctx->zin / ctx->zout);
+    //计算小数部分
     zfrac = (ngx_uint_t) ((ctx->zin * 100 / ctx->zout) % 100);
 
     if ((ctx->zin * 1000 / ctx->zout) % 10 > 4) {
@@ -1055,17 +1240,24 @@ ngx_http_gzip_ratio_variable(ngx_http_request_t *r,
         }
     }
 
+    //构造结果
     v->len = ngx_sprintf(v->data, "%ui.%02ui", zint, zfrac) - v->data;
 
     return NGX_OK;
 }
 
 
+/**
+ * create location configuration
+ * 
+ * 创建 loc级别的配置结构体
+ */
 static void *
 ngx_http_gzip_create_conf(ngx_conf_t *cf)
 {
     ngx_http_gzip_conf_t  *conf;
 
+    //创建配置结构体
     conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_gzip_conf_t));
     if (conf == NULL) {
         return NULL;
@@ -1092,6 +1284,10 @@ ngx_http_gzip_create_conf(ngx_conf_t *cf)
 }
 
 
+/**
+ * merge location configuration
+ * 合并location级别配置
+ */
 static char *
 ngx_http_gzip_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 {
@@ -1112,6 +1308,7 @@ ngx_http_gzip_merge_conf(ngx_conf_t *cf, void *parent, void *child)
                               MAX_MEM_LEVEL - 1);
     ngx_conf_merge_value(conf->min_length, prev->min_length, 20);
 
+    //合并gzip_types mime-type ...; 配置指令值，并初始化hash表conf->types
     if (ngx_http_merge_types(cf, &conf->types_keys, &conf->types,
                              &prev->types_keys, &prev->types,
                              ngx_http_html_default_types)
@@ -1124,6 +1321,11 @@ ngx_http_gzip_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 }
 
 
+/**
+ * postconfiguration
+ * 
+ * 安装filter
+ */
 static ngx_int_t
 ngx_http_gzip_filter_init(ngx_conf_t *cf)
 {

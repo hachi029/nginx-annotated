@@ -10,7 +10,12 @@
 #include <ngx_http.h>
 
 
+/**
+ * 本模块location级别的配置结构体
+ */
 typedef struct {
+    //output_buffers 配置指令值
+    //Sets the number and size of the buffers used for reading a response from a disk.
     ngx_bufs_t  bufs;
 } ngx_http_copy_filter_conf_t;
 
@@ -34,6 +39,10 @@ static ngx_int_t ngx_http_copy_filter_init(ngx_conf_t *cf);
 
 static ngx_command_t  ngx_http_copy_filter_commands[] = {
 
+    //https://nginx.org/en/docs/http/ngx_http_core_module.html#output_buffers
+    //output_buffers number size; 
+    //Sets the number and size of the buffers used for reading a response from a disk.
+    //默认是1个buf，大小为32768字节
     { ngx_string("output_buffers"),
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE2,
       ngx_conf_set_bufs_slot,
@@ -47,7 +56,7 @@ static ngx_command_t  ngx_http_copy_filter_commands[] = {
 
 static ngx_http_module_t  ngx_http_copy_filter_module_ctx = {
     NULL,                                  /* preconfiguration */
-    ngx_http_copy_filter_init,             /* postconfiguration */
+    ngx_http_copy_filter_init,             /* postconfiguration */      //只是安装了一个body filter
 
     NULL,                                  /* create main configuration */
     NULL,                                  /* init main configuration */
@@ -60,6 +69,20 @@ static ngx_http_module_t  ngx_http_copy_filter_module_ctx = {
 };
 
 
+/**
+ * https://www.kancloud.cn/kancloud/master-nginx-develop/51865
+ * 
+ * https://tengine.taobao.org/book/chapter_12.html#ngx-http-copy-filter-module
+ * 
+ * 主要是来将一些需要复制的buf（可能在文件中，也可能在内存中）重新复制一份交给后面的filter模块处理
+ * 
+ * 判断是否需要复制是ngx_output_chain_as_is()函数决定的。场景如:
+ *   1.有的buf在文件里，需要修改，则复制一份到内存，以供之后的filter进行处理;
+ *   2.有的buf虽然在内存里，但是是共享只读的，而后续的模块需要修改buf, 就需要重新拷贝一份;
+ * 
+ * 始终启用，只是响应体过滤函数(body-filter)， 主要工作是把文件中内容读到内存中，以便进行处理。
+ * 
+ */
 ngx_module_t  ngx_http_copy_filter_module = {
     NGX_MODULE_V1,
     &ngx_http_copy_filter_module_ctx,      /* module context */
@@ -79,11 +102,21 @@ ngx_module_t  ngx_http_copy_filter_module = {
 static ngx_http_output_body_filter_pt    ngx_http_next_body_filter;
 
 
+/**
+ * 本模块注册的 body_filter
+ * 
+ * 主要是来将一些需要复制的buf（可能在文件中，也可能在内存中）重新复制一份交给后面的filter模块处理
+ * 
+ * 判断是否需要复制是ngx_output_chain_as_is()函数决定的。场景如:
+ *   1.有的buf在文件里，需要修改，则复制一份到内存，以供之后的filter进行处理;
+ *   2.有的buf虽然在内存里，但是是共享只读的，而后续的模块需要修改buf, 就需要重新拷贝一份;
+ */
 static ngx_int_t
 ngx_http_copy_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
     ngx_int_t                     rc;
     ngx_connection_t             *c;
+    //本模块的上下文结构体
     ngx_output_chain_ctx_t       *ctx;
     ngx_http_core_loc_conf_t     *clcf;
     ngx_http_copy_filter_conf_t  *conf;
@@ -93,22 +126,29 @@ ngx_http_copy_filter(ngx_http_request_t *r, ngx_chain_t *in)
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, c->log, 0,
                    "http copy filter: \"%V?%V\"", &r->uri, &r->args);
 
+    /* 获取ctx */
     ctx = ngx_http_get_module_ctx(r, ngx_http_copy_filter_module);
 
+    /* 如果为空，则说明需要初始化ctx */
     if (ctx == NULL) {
         ctx = ngx_pcalloc(r->pool, sizeof(ngx_output_chain_ctx_t));
         if (ctx == NULL) {
             return NGX_ERROR;
         }
 
+        //设置模块ctx
         ngx_http_set_ctx(r, ctx, ngx_http_copy_filter_module);
 
+        //获取模块配置
         conf = ngx_http_get_module_loc_conf(r, ngx_http_copy_filter_module);
         clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
 
+        /* 设置sendfile */
         ctx->sendfile = c->sendfile;
+        /* 如果request设置了filter_need_in_memory的话，ctx的这个域就会被设置 */
         ctx->need_in_memory = r->main_filter_need_in_memory
                               || r->filter_need_in_memory;
+        /* 如果buf需要被修改，则 */
         ctx->need_in_temp = r->filter_need_temporary;
 
         ctx->alignment = clcf->directio_alignment;
@@ -117,8 +157,10 @@ ngx_http_copy_filter(ngx_http_request_t *r, ngx_chain_t *in)
         ctx->bufs = conf->bufs;
         ctx->tag = (ngx_buf_tag_t) &ngx_http_copy_filter_module;
 
+        /* 可以看到 output_filter 就是下一个body filter节点 */
         ctx->output_filter = (ngx_output_chain_filter_pt)
                                   ngx_http_next_body_filter;
+        /* 此时filter ctx为当前的请求r */
         ctx->filter_ctx = r;
 
 #if (NGX_HAVE_FILE_AIO)
@@ -133,6 +175,7 @@ ngx_http_copy_filter(ngx_http_request_t *r, ngx_chain_t *in)
         }
 #endif
 
+        //如果 in 包含数据  
         if (in && in->buf && ngx_buf_size(in->buf)) {
             r->request_output = 1;
         }
@@ -142,6 +185,7 @@ ngx_http_copy_filter(ngx_http_request_t *r, ngx_chain_t *in)
     ctx->aio = r->aio;
 #endif
 
+    /* 最关键的函数, 为此模块的主要逻辑 */
     rc = ngx_output_chain(ctx, in);
 
     if (ctx->in == NULL) {
@@ -358,6 +402,9 @@ ngx_http_copy_thread_event_handler(ngx_event_t *ev)
 #endif
 
 
+/**
+ * 创建location级别配置结构体
+ */
 static void *
 ngx_http_copy_filter_create_conf(ngx_conf_t *cf)
 {
@@ -386,6 +433,10 @@ ngx_http_copy_filter_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 }
 
 
+/**
+ * postconfiguration
+ * 安装一个body_filter
+ */
 static ngx_int_t
 ngx_http_copy_filter_init(ngx_conf_t *cf)
 {

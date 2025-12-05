@@ -7,8 +7,11 @@
 LC_ALL=C
 export LC_ALL
 
+#主是处理用户输入的configure选项，并由选项生成一些全局变量的值, 以及输出帮助信息等
 . auto/options
+#在于初始化一些临时文件的路径，检查echo的兼容性，并创建Makefile
 . auto/init
+#主要作用是定义不同功能或系统所需要的文件的变量
 . auto/sources
 
 test -d $NGX_OBJS || mkdir -p $NGX_OBJS
@@ -19,7 +22,10 @@ echo > $NGX_AUTOCONF_ERR
 echo "#define NGX_CONFIGURE \"$NGX_CONFIGURE\"" > $NGX_AUTO_CONFIG_H
 
 
+#这段代码中，可以看出，configure是如何定义一个特性的：通过宏定义，输出到config头文件中，然后在程序中可以判断这个宏是否有定义，来实现不同的特性。
+# NGX_DEBUG是在auto/options文件中处理的，如果有--with-debug选项，则其值是YES
 if [ $NGX_DEBUG = YES ]; then
+# 当有debug选项时，会定义NGX_DEBUG宏
     have=NGX_DEBUG . auto/have
 fi
 
@@ -47,22 +53,33 @@ else
     NGX_MACHINE=i386
 fi
 
+# 编译器选项
+#这一步主要是检测编译器，并设置编译器相关的选项。它先调用auto/cc/name来得到编译器的名称，然后根据编译器选择执行不同的编译器相关的文件如gcc执行auto/cc/gcc来设置编译器相关的一些选项
 . auto/cc/conf
 
+# 头文件支持宏定义
 if [ "$NGX_PLATFORM" != win32 ]; then
     . auto/headers
 fi
 
+# 操作系统相关的配置的检测
+# 针对不同的操作系统平台特性的检测，并针对不同的操作系统，设置不同的CORE_INCS、CORE_DEPS、CORE_SRCS变量。nginx跨平台的支持就是在这个地方体现出来的
 . auto/os/conf
 
+# unix体系下的通用配置检测
 if [ "$NGX_PLATFORM" != win32 ]; then
+    #针对unix体系的通用配置或系统调用的检测，如poll等事件处理系统调用的检测等。
     . auto/unix
 fi
 
 . auto/threads
+# 生成模块列表
 . auto/modules
+# 15.配置库的依赖
+#该文件会针对nginx编译所需要的基础库的检测，比如rewrite模块需要的PCRE库的检测支持。
 . auto/lib/conf
 
+#16. 接下来定义一些宏常量，主要是是文件路径方面的：
 case ".$NGX_PREFIX" in
     .)
         NGX_PREFIX=${NGX_PREFIX:-/usr/local/nginx}
@@ -104,8 +121,12 @@ have=NGX_HTTP_UWSGI_TEMP_PATH value="\"$NGX_HTTP_UWSGI_TEMP_PATH\""
 have=NGX_HTTP_SCGI_TEMP_PATH value="\"$NGX_HTTP_SCGI_TEMP_PATH\""
 . auto/define
 
+#17. configure最后的工作，生成编译安装的makefile
+# 生成objs/makefile文件
 . auto/make
+# 生成关于库的编译选项到makefile文件
 . auto/lib/make
+# 生成与安装相关的makefile文件内容，并生成最外层的makefile文件
 . auto/install
 
 # STUB
@@ -118,4 +139,5 @@ if [ ".$NGX_BUILD" != "." ]; then
     have=NGX_BUILD value="\"$NGX_BUILD\"" . auto/define
 fi
 
+# 编译的最后阶段，汇总信息
 . auto/summary

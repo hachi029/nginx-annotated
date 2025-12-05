@@ -1610,11 +1610,19 @@ ngx_ssl_new_client_session(ngx_ssl_conn_t *ssl_conn, ngx_ssl_session_t *sess)
 }
 
 
+/**
+ * 创建ngx_ssl_connection_t并初始化
+ * openssl库中关于ssl连接的初始化
+ * 
+ * ssl: 为ngx_ssl_module在srv级别配置结构体中的 ssl字段，ngx_http_ssl_srv_conf_t->ssl
+ * 
+ */
 ngx_int_t
 ngx_ssl_create_connection(ngx_ssl_t *ssl, ngx_connection_t *c, ngx_uint_t flags)
 {
     ngx_ssl_connection_t  *sc;
 
+    /* ngx_ssl_connection_t是nginx对ssl连接的描述结构，记录了ssl连接的信息和状态 */
     sc = ngx_pcalloc(c->pool, sizeof(ngx_ssl_connection_t));
     if (sc == NULL) {
         return NGX_ERROR;
@@ -1631,6 +1639,7 @@ ngx_ssl_create_connection(ngx_ssl_t *ssl, ngx_connection_t *c, ngx_uint_t flags)
     }
 #endif
 
+    /* 创建openssl库中对ssl连接的描述结构 */
     sc->connection = SSL_new(ssl->ctx);
 
     if (sc->connection == NULL) {
@@ -1638,15 +1647,18 @@ ngx_ssl_create_connection(ngx_ssl_t *ssl, ngx_connection_t *c, ngx_uint_t flags)
         return NGX_ERROR;
     }
 
+    /* 关联(openssl库)ssl连接到tcp连接对应的socket */
     if (SSL_set_fd(sc->connection, c->fd) == 0) {
         ngx_ssl_error(NGX_LOG_ALERT, c->log, 0, "SSL_set_fd() failed");
         return NGX_ERROR;
     }
 
     if (flags & NGX_SSL_CLIENT) {
+        /* upstream中发起对后端的ssl连接，指明nginx ssl连接是客户端 */
         SSL_set_connect_state(sc->connection);
 
     } else {
+        /* 指明nginx ssl连接是服务端 */
         SSL_set_accept_state(sc->connection);
 
 #ifdef SSL_OP_NO_RENEGOTIATION
@@ -1654,11 +1666,13 @@ ngx_ssl_create_connection(ngx_ssl_t *ssl, ngx_connection_t *c, ngx_uint_t flags)
 #endif
     }
 
+    /* 关联(openssl库)ssl连接到用户数据(当前连接c) */
     if (SSL_set_ex_data(sc->connection, ngx_ssl_connection_index, c) == 0) {
         ngx_ssl_error(NGX_LOG_ALERT, c->log, 0, "SSL_set_ex_data() failed");
         return NGX_ERROR;
     }
 
+    //设置 ngx_ssl_connection_t
     c->ssl = sc;
 
     return NGX_OK;
@@ -1704,6 +1718,12 @@ ngx_ssl_set_session(ngx_connection_t *c, ngx_ssl_session_t *session)
 }
 
 
+/**
+ * ngx_http_ssl_handshake->.
+ * 
+ * 执行ssl握手
+ * 
+ */
 ngx_int_t
 ngx_ssl_handshake(ngx_connection_t *c)
 {
@@ -1727,8 +1747,10 @@ ngx_ssl_handshake(ngx_connection_t *c)
 
     ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0, "SSL_do_handshake: %d", n);
 
+    /* 返回1表示ssl握手成功 */
     if (n == 1) {
 
+        //添加读写事件监听
         if (ngx_handle_read_event(c->read, 0) != NGX_OK) {
             return NGX_ERROR;
         }
@@ -1741,6 +1763,7 @@ ngx_ssl_handshake(ngx_connection_t *c)
         ngx_ssl_handshake_log(c);
 #endif
 
+        //ssl握手完成，ngx_ssl_handshake会替换连接的读写接口。这样，后续需要读写数据时，替换的接口会对数据进行加密解密
         c->recv = ngx_ssl_recv;
         c->send = ngx_ssl_write;
         c->recv_chain = ngx_ssl_recv_chain;
@@ -2073,6 +2096,9 @@ ngx_ssl_handshake_handler(ngx_event_t *ev)
 }
 
 
+/**
+ * c->recv_chain = ngx_ssl_recv_chain;
+ */
 ssize_t
 ngx_ssl_recv_chain(ngx_connection_t *c, ngx_chain_t *cl, off_t limit)
 {
@@ -2136,6 +2162,13 @@ ngx_ssl_recv_chain(ngx_connection_t *c, ngx_chain_t *cl, off_t limit)
 }
 
 
+/**
+ * ngx_ssl_handshake:  c->recv = ngx_ssl_recv
+ * 
+ * ssl握手完成，ngx_ssl_handshake会替换连接的读写接口。这样，后续需要读写数据时，替换的接口会对数据进行加密解密
+ * 
+ * 核心是调用openssl库函数SSL_read()来读取并解密数据
+ */
 ssize_t
 ngx_ssl_recv(ngx_connection_t *c, u_char *buf, size_t size)
 {
@@ -2170,6 +2203,7 @@ ngx_ssl_recv(ngx_connection_t *c, u_char *buf, size_t size)
 
     for ( ;; ) {
 
+        //调用openssl库函数SSL_read()来读取并解密数据
         n = SSL_read(c->ssl->connection, buf, size);
 
         ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0, "SSL_read: %d", n);
@@ -2522,6 +2556,10 @@ ngx_ssl_write_handler(ngx_event_t *wev)
  * the output to decrease a SSL overhead some more.
  */
 
+ /**
+  * c->send_chain = ngx_ssl_send_chain;
+  * 
+  */
 ngx_chain_t *
 ngx_ssl_send_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
 {
@@ -2710,6 +2748,11 @@ ngx_ssl_send_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
 }
 
 
+/**
+ * ngx_ssl_handshake: c->send = ngx_ssl_write
+ * 
+ * ssl握手完成，ngx_ssl_handshake会替换连接的读写接口。这样，后续需要读写数据时，替换的接口会对数据进行加密解密
+ */
 ssize_t
 ngx_ssl_write(ngx_connection_t *c, u_char *data, size_t size)
 {
