@@ -841,6 +841,7 @@ ngx_str_t  ngx_http_core_get_method = { 3, (u_char *) "GET" };
  * 
  * 1.解析完请求头后， ngx_http_process_request->ngx_http_handler
  * 2.子请求的sr->write_event_handler = ngx_http_handler; 
+ * 3.重定向请求：ngx_http_internal_redirect -> .
  *
  * 主要逻辑是根据是否是interval请求，确定phase_handler，然后调用 ngx_http_core_run_phases
  * 执行流程：
@@ -967,11 +968,17 @@ ngx_http_core_run_phases(ngx_http_request_t *r)
  *  NGX_HTTP_POST_READ_PHASE、 NGX_HTTP_PREACCESS_PHASE、 NGX_HTTP_LOG_PHASE
  * 
  * handler返回值：
- *  NGX_OK:	表示该阶段已经处理完成，需要转入下一个阶段；
+ *  NGX_OK:	表示该阶段已经处理完成，需要转入下一个阶段；Proceed to the next phase.
  *  NG_DECLINED:	表示需要转入本阶段的下一个handler继续处理；
+ *            (Proceed to the next handler of the current phase. If the current handler is the last in the current phase, move to the next phase.)
  *  NGX_AGAIN, NGX_DONE: 表示需要等待某个事件发生才能继续处理（比如等待网络IO），此时Nginx为了不阻塞其他请求的处理，
- *                      必须中断当前请求的执行链，等待事件发生之后继续执行该handler；
+ *           必须中断当前请求的执行链，等待事件发生之后继续执行该handler；
+ *           (Suspend phase handling until some future event which can be an asynchronous I/O operation or just a delay, for example. 
+ *          It is assumed, that phase handling will be resumed later by calling ngx_http_core_run_phases())
  *  NGX_ERROR:	表示发生了错误，需要结束该请求。
+ * 
+ * Any other value returned by the phase handler is treated as a request finalization code, 
+ * in particular, an HTTP response code. The request is finalized with the code provided
  * 
  * handler函数的返回值一定要根据不同phase的checker函数来设置
  */
@@ -3101,6 +3108,11 @@ ngx_http_internal_redirect(ngx_http_request_t *r,
     // 重新设置请求的文件扩展名
     ngx_http_set_exten(r);
 
+    //Both functions - ngx_http_internal_redirect(r, uri, args) and ngx_http_named_location(r, name) can be called 
+    //when nginx modules have already stored some contexts in a request's ctx field. 
+    //It's possible for these contexts to become inconsistent with the new location configuration. 
+    //To prevent inconsistency, all request contexts are erased by both redirect functions.
+    //清空所有模块的上下文结构体
     /* clear the modules contexts */
     ngx_memzero(r->ctx, sizeof(void *) * ngx_http_max_module);
 
@@ -3118,6 +3130,7 @@ ngx_http_internal_redirect(ngx_http_request_t *r,
     r->add_uri_to_alias = 0;
     r->main->count++;             //增加引用计数  
 
+    //请求分发
     ngx_http_handler(r);
 
     return NGX_DONE;
@@ -3139,6 +3152,7 @@ ngx_http_named_location(ngx_http_request_t *r, ngx_str_t *name)
     r->main->count++;
     r->uri_changes--;
 
+    //重定向次数过多
     if (r->uri_changes == 0) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "rewrite or internal redirection cycle "
@@ -3148,6 +3162,7 @@ ngx_http_named_location(ngx_http_request_t *r, ngx_str_t *name)
         return NGX_DONE;
     }
 
+    //重定向的uri长度为0
     if (r->uri.len == 0) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "empty URI in redirect to named location \"%V\"", name);
@@ -3156,8 +3171,10 @@ ngx_http_named_location(ngx_http_request_t *r, ngx_str_t *name)
         return NGX_DONE;
     }
 
+    //查找server配置
     cscf = ngx_http_get_module_srv_conf(r, ngx_http_core_module);
 
+    //遍历named_locations
     if (cscf->named_locations) {
 
         for (clcfp = cscf->named_locations; *clcfp; clcfp++) {
@@ -3165,6 +3182,7 @@ ngx_http_named_location(ngx_http_request_t *r, ngx_str_t *name)
             ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                            "test location: \"%V\"", &(*clcfp)->name);
 
+            //比较名称
             if (name->len != (*clcfp)->name.len
                 || ngx_strncmp(name->data, (*clcfp)->name.data, name->len) != 0)
             {
@@ -3175,18 +3193,27 @@ ngx_http_named_location(ngx_http_request_t *r, ngx_str_t *name)
                            "using location: %V \"%V?%V\"",
                            name, &r->uri, &r->args);
 
+            //找到了
+            //标识为内部请求
             r->internal = 1;
             r->content_handler = NULL;
             r->uri_changed = 0;
+            //设置location配置结构体
             r->loc_conf = (*clcfp)->loc_conf;
 
             /* clear the modules contexts */
+            //Both functions - ngx_http_internal_redirect(r, uri, args) and ngx_http_named_location(r, name) can be called 
+            //when nginx modules have already stored some contexts in a request's ctx field. 
+            //It's possible for these contexts to become inconsistent with the new location configuration. 
+            //To prevent inconsistency, all request contexts are erased by both redirect functions.
+            //清空所有模块的上下文结构体
             ngx_memzero(r->ctx, sizeof(void *) * ngx_http_max_module);
 
             ngx_http_update_location_config(r);
 
             cmcf = ngx_http_get_module_main_conf(r, ngx_http_core_module);
 
+            //切换到rewrite阶段
             r->phase_handler = cmcf->phase_engine.location_rewrite_index;
 
             r->write_event_handler = ngx_http_core_run_phases;
@@ -3199,6 +3226,7 @@ ngx_http_named_location(ngx_http_request_t *r, ngx_str_t *name)
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                   "could not find named location \"%V\"", name);
 
+    //结束请求，内部错误
     ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
 
     return NGX_DONE;

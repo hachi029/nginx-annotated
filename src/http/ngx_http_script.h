@@ -82,7 +82,9 @@ typedef struct {
 
 /**
  * 表示一个复杂变量（脚本），含有多个'$'的字符串
- * 需要在运行时计算
+ * 需要在运行时计算。
+ * 
+ * 由ngx_http_compile_complex_value在配置阶段编译而来
  */
 typedef struct {
     ngx_str_t                   value;      //解析出来的变量值
@@ -91,6 +93,8 @@ typedef struct {
     //执行是遍历其中的2个数组（lengths 、values）调用编译阶段添加的回调函数。
     ngx_uint_t                 *flushes;
     //用于计算变量值的长度
+    //contains information about the presence of variables in the expression
+    //The NULL value means that the expression contained static text only, and so can be stored in a simple string rather than as a complex value
     void                       *lengths;
     //用于计算变量值
     void                       *values;
@@ -102,17 +106,24 @@ typedef struct {
 
 
 /**
+ * The complex value description in ngx_http_compile_complex_value is compiled at the configuration stage 
+ * into ngx_http_complex_value_t which is used at runtime to obtain results of expression evaluation.
+ * 
  * 对字符串进行“编译”，之后才能正确得到变量值。
  * 
  * 因此需要通过这个结构体，才能获取到ngx_http_complex_value_t
  */ 
 typedef struct {
-    ngx_conf_t                 *cf;     // nginx的配置结构体指针
-    ngx_str_t                  *value;  // 配置文件里的原始字符串
-    ngx_http_complex_value_t   *complex_value;  // 编译后的输出结果，即复杂变量
+    ngx_conf_t                 *cf;     // nginx的配置结构体指针 Configuration pointer
+    ngx_str_t                  *value;  // 配置文件里的原始字符串 String to be parsed (input)
+    ngx_http_complex_value_t   *complex_value;  // 编译后的输出结果，即复杂变量 Compiled value (output)
 
-    unsigned                    zero:1;
+    //The zero flag is useful when results are to be passed to libraries that require zero-terminated strings, 
+    //and prefixes are handy when dealing with filenames
+    unsigned                    zero:1;         // Flag that enables zero-terminating value
+    //Prefixes the result with the configuration prefix (the directory where nginx is currently looking for configuration)
     unsigned                    conf_prefix:1;      //标识值是nginx.conf配置文件所在目录的路径字符串
+    //Prefixes the result with the root prefix (the normal nginx installation prefix)
     unsigned                    root_prefix:1;      //标识值是nginx.conf配置文件所在目录的路径字符串
 } ngx_http_compile_complex_value_t;
 

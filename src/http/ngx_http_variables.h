@@ -59,7 +59,7 @@ typedef ngx_int_t (*ngx_http_get_variable_pt) (ngx_http_request_t *r,
 
 
 /**
- * 保存变量名的结构体
+ * 保存变量名的结构体 (ngx_http_add_variable()方法的返回值)
  * 负责指定一个变量名字符串，以及如何去解析出相应的变量值
  * 
  * 所有 的变量名定义ngx_http_variable_t都会保存在全局唯一的ngx_http_core_main_conf_t对象中
@@ -84,7 +84,7 @@ struct ngx_http_variable_s {
      * #define NGX_HTTP_VAR_NOHASH       8      不加入hash, 如只通过索引访问的变量
      */
     ngx_uint_t                    flags;
-    // 这个数字也就是变量值在请求中的缓存数组中的索引
+    // 这个数字也就是变量值在请求中的缓存数组中的索引 holds assigned variable index used to reference the variable
     ngx_uint_t                    index;
 };
 

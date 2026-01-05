@@ -491,6 +491,19 @@ struct ngx_http_request_s {
     void                            **ctx;
     void                            **main_conf;    // 指向请求对应的存放 main级别配置结构体的指针数组
     void                            **srv_conf;     // 指向请求对应的存放 srv级别配置结构体的指针数组
+    /**
+     * https://nginx.org/en/docs/dev/development_guide.html#http_request_redirection
+     * 
+     * An HTTP request is always connected to a location via the loc_conf
+     * 
+     * This means that at any point the location configuration of any module can be retrieved from the request by calling ngx_http_get_module_loc_conf(r, module)
+     * 
+     * Request location can change several times during the request's lifetime.Initially, a default server location of the default server is assigned to a request
+     *  If the request switches to a different server (chosen by the HTTP “Host” header or SSL SNI extension),  the request switches to the default location of that server as well
+     * The next change of the location takes place at the NGX_HTTP_FIND_CONFIG_PHASE request phase.
+     * 
+     * 
+     * */ 
     void                            **loc_conf;     // 指向请求对应的存放 loc级别配置结构体的指针数组
 
     /**

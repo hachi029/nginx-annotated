@@ -47,6 +47,12 @@ static ngx_http_module_t  ngx_http_postpone_filter_module_ctx = {
  *  2.The first subrequest of an active request becomes active right after creation.
  *  3.The ngx_http_postpone_filter activates the next request in the active request's subrequest list, once all data prior to that request are sent.
  *  4.When a request is finalized, its parent is activated.
+ * 
+ * Subrequests are normally created in a body filter, in which case their output can be treated like the output from any explicit request. 
+ * This means that eventually the output of a subrequest is sent to the client, 
+ * after all explicit buffers that are passed before subrequest creation and before any buffers that are passed after creation. 
+ * This ordering is preserved even for large hierarchies of subrequests. 
+ * 
  */
 /**
  * 是一个必选filter, 不能通过编译选项移除。实现子请求必不可少, 用来将子请求和主请求的输出链合并

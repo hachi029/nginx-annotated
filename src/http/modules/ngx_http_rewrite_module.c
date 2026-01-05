@@ -14,6 +14,11 @@
  * https://nginx.org/en/docs/http/ngx_http_rewrite_module.html
  * 使用正则表达式改变请求url， 返回重定向
  * 
+ * The ngx_http_rewrite_module can change the request URI at the NGX_HTTP_REWRITE_PHASE request phase as a result of the rewrite directive 
+ * and send the request back to the NGX_HTTP_FIND_CONFIG_PHASE phase for selection of a new location based on the new URI
+ * 
+ * It is also possible to redirect a request to a new location at any point by calling one of ngx_http_internal_redirect(r, uri, args) or ngx_http_named_location(r, name)
+ * 
  */
 
  /**

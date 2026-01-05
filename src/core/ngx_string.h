@@ -30,14 +30,17 @@ typedef struct {
  * 描述变量值的结构 ngx_http_variable_value_t 等同于此. 类似ngx_str_t, 只是多了一些标识
  */
 typedef struct {
-    unsigned    len:28;     // 变量值必须是在一段连续内存中的字符串，值的长度就是 len成员
+    unsigned    len:28;     // 变量值必须是在一段连续内存中的字符串，值的长度就是 len成员,与之后的data配合使用
 
     unsigned    valid:1;    // valid为 1时表示当前这个变量值已经解析过，且数据是可用的
-    // no_cacheable为 1时表示变量值不可以被缓存，它与ngx_http_variable_t结构体 flags成员
+    // no_cacheable为 1时表示变量值不可以被缓存，它与ngx_http_variable_t结构体 flags成员 (Do not cache result)
     // 里的 NGX_HTTP_VAR_NOCACHEABLE标志位是相关的，即设置这个标志位后 no_cacheable就会为 1
     unsigned    no_cacheable:1; 
+    //The variable was not found and thus the data and len fields are irrelevant
+    //this can happen, for example, with variables like $arg_foo when a corresponding argument was not passed in a request
     unsigned    not_found:1;    // not_found为 1表示当前这个变量值已经解析过，但没有解析到相应的值
-    unsigned    escape:1;       // 仅由 ngx_http_log_module模块使用，用于日志格式的字符转义，其他模块通常忽略这个字段
+    //Used internally by the logging module to mark values that require escaping on output
+    unsigned    escape:1;       // 仅由 ngx_http_log_module模块使用，用于输出日志是对日志字符进行转义，其他模块通常忽略这个字段
 
     u_char     *data;           // data就指向变量值所在内存的起始地址，与len成员配合使用
 } ngx_variable_value_t;

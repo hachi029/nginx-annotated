@@ -134,43 +134,84 @@ typedef struct {
  */
 typedef enum {
     // 在接收到完整的 HTTP头部后处理的 HTTP阶段
+    //First phase. The ngx_http_realip_module registers its handler at this phase to enable substitution of client addresses before any other module is invoked
     NGX_HTTP_POST_READ_PHASE = 0,
 
     //A subrequest starts in the NGX_HTTP_SERVER_REWRITE_PHASE phase. 
     //It passes through the same subsequent phases as a normal request and is assigned a location based on its own URI
     //在将请求的URI与 location表达式匹配前，修改请求的 URI（所谓的重定向）是一个独立的 HTTP阶段
     //server级别的uri重写阶段，也就是该阶段执行处于server块内，location块外的重写指令，在读取请求头的过程中nginx会根据host及端口找到对应的虚拟主机配置；
+    //Phase where rewrite directives defined in a server block (but outside a location block) are processed. The ngx_http_rewrite_module installs its handler at this phase
     NGX_HTTP_SERVER_REWRITE_PHASE,
 
     //根据请求的 URI寻找匹配的 location表达式
     //寻找location配置阶段，该阶段使用重写之后的uri来查找对应的location, 该阶段可能会被执行多次，因为也可能有location级别的重写指令
+    /**
+     * Special phase where a location is chosen based on the request URI. 
+     * Before this phase, the default location for the relevant virtual server is assigned to the request, 
+     * and any module requesting a location configuration receives the configuration for the default server location. 
+     * This phase assigns a new location to the request. No additional handlers can be registered at this phase
+     */
     NGX_HTTP_FIND_CONFIG_PHASE,     //只能由ngx_http_core_module模块实现
     //在 NGX_HTTP_FIND_CONFIG_PHASE阶段寻找到匹配的 location之后再修改请求的 URI
     //location级别的uri重写阶段，该阶段执行location基本的重写指令，也可能会被执行多次
+    // Same as NGX_HTTP_SERVER_REWRITE_PHASE, but for rewrite rules defined in the location, chosen in the previous phase.
     NGX_HTTP_REWRITE_PHASE,
     //这一阶段是用于在 rewrite重写 URL后，防止错误的 nginx.conf配置导致死循环（递归地修改 URI）
     //这一阶段仅由 ngx_http_core_module模块处理。目前，控制死循环的方式很简单，首先检查 rewrite的次数，
     //如果一个请求超过10次重定向 ,就认为进入了rewrite死循环，这时在 NGX_HTTP_POST_REWRITE_PHASE阶段就会向用户返回 500，表示服务器内部错误
+    /**
+     * Special phase where the request is redirected to a new location if its URI changed during a rewrite. 
+     * This is implemented by the request going through the NGX_HTTP_FIND_CONFIG_PHASE again. 
+     * No additional handlers can be registered at this phase
+     */
     NGX_HTTP_POST_REWRITE_PHASE,  //仅由 ngx_http_core_module模块处理
 
     //处理 NGX_HTTP_ACCESS_PHASE阶段决定请求的访问权限前， HTTP模块可以介入的处理阶段
+    /**
+     * A common phase for different types of handlers, not associated with access control. 
+     * The standard nginx modules ngx_http_limit_conn_module and ngx_http_limit_req_module register their handlers at this phase.
+     */
     NGX_HTTP_PREACCESS_PHASE,
 
+    /**
+     * Phase where it is verified that the client is authorized to make the request
+     * By default the client must pass the authorization check of all handlers registered at this phase for the request to continue to the next phase
+     * The satisfy directive, can be used to permit processing to continue if any of the phase handlers authorizes the client
+     * */ 
     //用于让HTTP模块判断是否允许这个请求访问 Nginx服务器
     NGX_HTTP_ACCESS_PHASE,
     //在 NGX_HTTP_ACCESS_PHASE阶段中，当 HTTP模块的 handler处理函数返回不允许访问的错误码时
     //（实际就是 NGX_HTTP_FORBIDDEN或者 NGX_HTTP_UNAUTHORIZED），这里将负责向用户发送拒绝服务的错误响应。
     //因此，这个阶段实际上用于给NGX_HTTP_ACCESS_PHASE阶段收尾
+    /**
+     * Special phase where the satisfy any directive is processed. 
+     * If some access phase handlers denied access and none explicitly allowed it, the request is finalized. 
+     * No additional handlers can be registered at this phase
+     */
     NGX_HTTP_POST_ACCESS_PHASE,
 
+    //Phase for handlers to be called prior to generating content
     //这个阶段完全是为 try_files配置项而设立的，当 HTTP请求访问静态文件资源时， 
     //try_files配置项可以使这个请求顺序地访问多个静态文件资源，如果某一次访问失败，
     //则继续访问 try_files中指定的下一个静态资源。这个功能完全是在 NGX_HTTP_TRY_FILES_PHASE阶段中实现的
     NGX_HTTP_PRECONTENT_PHASE,
 
+    /**
+     * Phase where the response is normally generated.
+     * Multiple nginx standard modules register their handlers at this phase, including ngx_http_index_module or ngx_http_static_module. 
+     * They are called sequentially until one of them produces the output. 
+     * It's also possible to set content handlers on a per-location basis
+     * If the ngx_http_core_module's location configuration has handler set, it is called as the content handler and the handlers installed at this phase are ignored
+     */
     // 用于处理 HTTP请求内容的阶段，这是大部分 HTTP模块介入的阶段
     NGX_HTTP_CONTENT_PHASE,
 
+    /**
+     * Phase where request logging is performed. 
+     * Currently, only the ngx_http_log_module registers its handler at this stage for access logging. 
+     * Log phase handlers are called at the very end of request processing, right before freeing the request
+     */
     //进入该阶段表明该请求的响应已经发送到系统发送缓冲区, 在ngx_http_free_request中执行。具体的执行的函数为ngx_http_log_request
     //处理完请求后记录日志的阶段。例如，ngx_http_log_module模块就在这个阶段中加入了一个 handler处理方法，
     //使得每个 HTTP请求处理完毕后会记录 access_log访问日志
@@ -351,6 +392,7 @@ typedef struct {
     unsigned                    captures:1;
 #endif
 
+    //named_locations @xxx
     ngx_http_core_loc_conf_t  **named_locations;
 } ngx_http_core_srv_conf_t;
 

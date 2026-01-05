@@ -468,6 +468,14 @@ static ngx_uint_t  ngx_http_variable_depth = 100;
  *    以及配置文件中使用set命令设置的变量),这里的初始化包括初始化hash表,以及初始化数组索引.
  *  3.当每次请求到来时会给每个请求创建一个变量数组(数组的个数就是上面第二步所保存的变量个数)。然后只有取变量值的时候，才会将变量保存在对应的变量数组位置。
  */
+/**
+ * flags:
+ *  - NGX_HTTP_VAR_CHANGEABLE: Enables redefinition of the variable: there is no conflict if another module defines a variable with the same name. This allows the set directive to override variables.
+ *  - NGX_HTTP_VAR_NOCACHEABLE: Disables caching, which is useful for variables such as $time_local.
+ *  - NGX_HTTP_VAR_NOHASH: Indicates that this variable is only accessible by index, not by name. This is a small optimization for use when it is known that the variable is not needed in modules like SSI or Perl.
+ *  - NGX_HTTP_VAR_PREFIX: The name of the variable is a prefix. In this case, a handler must implement additional logic to obtain the value of a specific variable. 
+ *                         For example, all “arg_” variables are processed by the same handler, which performs lookup in request arguments and returns the value of a specific argument
+ */
 ngx_http_variable_t *
 ngx_http_add_variable(ngx_conf_t *cf, ngx_str_t *name, ngx_uint_t flags)
 {
@@ -705,6 +713,7 @@ ngx_http_get_variable_index(ngx_conf_t *cf, ngx_str_t *name)
 
 
 /**
+ * returns a cached value
  * 基于变量索引值，获取变量值
  * 返回值就是变量值, 返回NULL 即没有解析出变量
  * 
@@ -770,7 +779,7 @@ ngx_http_get_indexed_variable(ngx_http_request_t *r, ngx_uint_t index)
 
 /**
  * 作用等同于ngx_http_get_indexed_variable， 区别是如果flags里设置了 NGX_HTTP_VAR_NOCACHEABLE，本方法重新解析
- * 
+ *  flushes the cache for non-cacheable variables
  */
 ngx_http_variable_value_t *
 ngx_http_get_flushed_variable(ngx_http_request_t *r, ngx_uint_t index)
@@ -804,6 +813,10 @@ ngx_http_get_flushed_variable(ngx_http_request_t *r, ngx_uint_t index)
  * 
  * 
  * 依次尝试从cmcf->variables_hash、cmcf->prefix_variables 中获取变量值
+ * 
+ * Some modules, such as SSI and Perl, need to deal with variables for which the name is not known at configuration time. 
+ * An index therefore cannot be used to access them, but the ngx_http_get_variable(r, name, key) function is available. 
+ * It searches for a variable with a given name and its hash key derived from the name.
  * 
  */
 ngx_http_variable_value_t *

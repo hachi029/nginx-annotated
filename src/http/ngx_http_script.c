@@ -285,6 +285,9 @@ ngx_http_compile_complex_value(ngx_http_compile_complex_value_t *ccv)
 
 /**
  * 脚本变量的设置方法
+ * 
+ * a convenient function used to initialize a complex value completely in the directive declaration itself
+ * 
  */
 char *
 ngx_http_set_complex_value_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
