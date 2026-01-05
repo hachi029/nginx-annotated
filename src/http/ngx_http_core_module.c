@@ -2153,6 +2153,21 @@ ngx_http_send_response(ngx_http_request_t *r, ngx_uint_t status,
 
 
 /**
+ * https://nginx.org/en/docs/dev/development_guide.html#http_response
+ * 
+ * Do not call this function until r->headers_out contains all of the data required to produce the HTTP response header.
+ * If the response status indicates that a response body follows the header, content_length_n can be set as well. 
+ * The default value for this field is -1, which means that the body size is unknown. 
+ * In this case, chunked transfer encoding is used. 
+ */
+
+ /**
+  * The final header handler ngx_http_top_header_filter constructs the HTTP response based on r->headers_out 
+  * and passes it to the ngx_http_write_filter for output
+  * 
+  * 
+  */
+/**
  * 发送请求header到客户端 , 调用ngx_http_top_header_filter， 启动header_filter流程
  * 
  * 最后一个header_filter  ngx_http_header_filter 负责构建响应行、响应头buf, 发送出去
@@ -2182,6 +2197,29 @@ ngx_http_send_header(ngx_http_request_t *r)
 }
 
 
+/**
+ * https://nginx.org/en/docs/dev/development_guide.html#http_response_body
+ * To send the response body, call the ngx_http_output_filter(r, cl) function. The function can be called multiple times. 
+ * Each time, it sends a part of the response body in the form of a buffer chain. Set the last_buf flag in the last body buffer.
+ * 
+ */
+
+/**
+ * https://nginx.org/en/docs/dev/development_guide.html#http_response_body_filters
+ * 
+ * This function invokes the body filter chain by calling the first body filter handler stored in the ngx_http_top_body_filter variable.
+ * It's assumed that every body handler calls the next handler in the chain until the final handler ngx_http_write_filter(r, cl) is called
+ * 
+ * A body filter handler receives a chain of buffers. The handler is supposed to process the buffers and pass a possibly new chain to the next handler.
+ * 
+ * the chain links ngx_chain_t of the incoming chain belong to the caller, and must not be reused or changed
+ * 
+ * Right after the handler completes, the caller can use its output chain links to keep track of the buffers it has sent
+ * 
+ * To save the buffer chain or to substitute some buffers before passing to the next filter, a handler needs to allocate its own chain links
+ * 
+ * 不破坏原始链表节点，通过分配自己的链表节点（chain links）来重组数据
+ */
 /**
  * 在自定义模块中调用此方法即可向客户端发送响应体
  * 

@@ -2555,6 +2555,8 @@ ngx_http_upstream_send_request_body(ngx_http_request_t *r,
         if (r->reading_body) {
             /* read client request body */
 
+            //after calling ngx_http_read_client_request_body(), the bufs chain might keep only a part of the body. 
+            // To read the next part, call the ngx_http_read_unbuffered_request_body(r) function
             rc = ngx_http_read_unbuffered_request_body(r);
 
             if (rc >= NGX_HTTP_SPECIAL_RESPONSE) {

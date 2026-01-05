@@ -171,7 +171,7 @@ ngx_http_header_out_t  ngx_http_headers_out[] = {
  * 3.根据 HTTP 响应报文的状态行、响应头部将字符串序列化为发送响应头部所需的字节数len，方便下面分配缓冲区空间存在待发送的响应头部；
  * 4.根据前一步骤计算的 len 值在当前请求内存池中分配用于存储响应头部的字符流缓冲区b，并将响应报文的状态行、响应头部按照HTTP 规范序列化地复制到刚分配的缓冲区b 中；
  * 5.将待发送响应头部的缓冲区 b 挂载到链表缓冲区 out.buf 中；挂载的目的是：当响应头部不能一次性发送完毕时，ngx_http_header_filter 方法会返回NGX_AGAIN，表示发送的响应头部不完整，则把剩余的响应头部数据保存在out 链表缓冲区中，以便调用ngx_http_filter_request 时，再次调用 HTTP 框架将 out 链表缓冲区的剩余响应头部字符流发送出去；
- * 6.调用 ngx_http_writer_filter 方法将out 链表缓冲区的响应头部发送出去，但是不能保证一次性发送完毕；
+ * 6.调用 ngx_http_write_filter 方法将out 链表缓冲区的响应头部发送出去，但是不能保证一次性发送完毕；
  * 
  */
 static ngx_int_t

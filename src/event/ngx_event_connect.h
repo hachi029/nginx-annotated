@@ -34,6 +34,8 @@ typedef void (*ngx_event_save_peer_session_pt)(ngx_peer_connection_t *pc,
 
 
 /**
+ * https://nginx.org/en/docs/dev/development_guide.html#http_load_balancing
+ * 
  * 表示与上游服务器的连接的结构体
  * Nginx会试图主动向其他上游服务器建立连接， 并以此连接与上游服务器通信
  * 是对 ngx_connection_t的封装，ngx_connection_t从连接池里获取，ngx_peer_connection_t 每次都会重新生成
@@ -54,8 +56,28 @@ struct ngx_peer_connection_s {
     //upstream启动时间
     ngx_msec_t                       start_time;
 
+    //get(pc, data)
+    //The method called when the upstream module is ready to pass a request to an upstream server and needs to know its address
+    //The method has to fill the sockaddr, socklen, and name fields of ngx_peer_connection_t structure
+    /**
+     * The return is one of:
+     * NGX_OK — Server was selected.
+       NGX_ERROR — Internal error occurred.
+       NGX_BUSY — no servers are currently available. This can happen due to many reasons, including: the dynamic server group is empty, 
+                  all servers in the group are in the failed state, or all servers in the group are already handling the maximum number of connections.
+       NGX_DONE — the underlying connection was reused and there is no need to create a new connection to the upstream server. 
+                    This value is set by the keepalive module.
+     */
     //获取连接的方法，如果使用长连接构成的连接池，那么必须要实现 get方法
     ngx_event_get_peer_pt            get;       /* 负载均衡模块实现，用于选取一个后端服务器 */
+    //free(pc, data, state)
+    //The method called when an upstream module has finished work with a particular server.
+    //The state argument is the completion status of the upstream connection, a bitmask with the following possible values:
+    /**
+     *  NGX_PEER_FAILED — Attempt was unsuccessful
+     *  NGX_PEER_NEXT — A special case when upstream server returns codes 403 or 404, which are not considered a failure.
+     *  NGX_PEER_KEEPALIVE — Currently unused
+     */
     // 与 get方法对应的释放连接的方法
     ngx_event_free_peer_pt           free;      /* 负载均衡模块实现，用于释放一个后端服务器 */
 
@@ -65,6 +87,10 @@ struct ngx_peer_connection_s {
     /* 为每个请求专用的负载均衡数据，一般指向ngx_http_upstream_<name>_peer_data_t */
     void                            *data;  //get需要的数据
 
+    /**
+     * SSL-specific methods that enable caching sessions to upstream servers. 
+     * The implementation is provided by the round-robin balancing method
+     */
 #if (NGX_SSL || NGX_COMPAT)
     ngx_event_set_peer_session_pt    set_session;
     ngx_event_save_peer_session_pt   save_session;

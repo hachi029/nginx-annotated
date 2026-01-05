@@ -341,6 +341,17 @@ done:
 }
 
 
+    /**
+     * 
+     * https://nginx.org/en/docs/dev/development_guide.html#http_request_body_filters
+     * 
+     * The request_body_no_buffering flag enables the unbuffered mode of reading a request body. 
+     * In this mode, after calling ngx_http_read_client_request_body(), the bufs chain might keep only a part of the body. 
+     * To read the next part, call the ngx_http_read_unbuffered_request_body(r) function. 
+     * The return value NGX_AGAIN and the request flag reading_body indicate that more data is available. 
+     * If bufs is NULL after calling this function, there is nothing to read at the moment. 
+     * The request callback read_event_handler will be called when the next part of request body is available.
+     */
 ngx_int_t
 ngx_http_read_unbuffered_request_body(ngx_http_request_t *r)
 {
@@ -1561,13 +1572,27 @@ ngx_http_request_body_chunked_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
 
 /**
+ * 参考 ngx_http_core_postconfiguration方法: 
  * ngx_http_top_request_body_filter = ngx_http_request_body_save_filter;
+ * 
  * 
  * 将in链表中的buf复制到r->request_body->bufs中
  * 
  * 如果允许将请求体缓存到本地文件，则尝试将请求缓存到本地磁盘
  * 
  * 把bufs的body写到临时文件，如果rest==0时，也就是全部body写到文件中，则把保存body的临时文件赋到bufs。
+ */
+/**
+ * https://nginx.org/en/docs/dev/development_guide.html#http_request_body_filters
+ * 
+ * After a request body part is read, it's passed to the request body filter chain by calling the first body filter handler 
+ * stored in the ngx_http_top_request_body_filter variable.
+ * It's assumed that every body handler calls the next handler in the chain until the final handler ngx_http_request_body_save_filter(r, cl) is called.
+ * 
+ * This handler collects the buffers in r->request_body->bufs and writes them to a file if necessary. 
+ * The last request body buffer has nonzero last_buf flag.
+ * 
+ * 
  */
 ngx_int_t
 ngx_http_request_body_save_filter(ngx_http_request_t *r, ngx_chain_t *in)

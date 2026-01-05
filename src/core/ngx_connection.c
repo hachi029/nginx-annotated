@@ -1423,6 +1423,9 @@ ngx_close_connection(ngx_connection_t *c)
  * 
  * ngx_reusable_connection(c, 0) 退出可重用状态
  *  ngx_reusable_connection(c, 1) 设置reuse 标识在 connection结构体中，并且将连接插入 cycle对象的队列  reusable_connections_queue 中
+ * 
+ * 当 Nginx 的连接池满了，而此时有新的客户端请求进来，会查看这个 LRU 队列，关闭队列中最老的一个“可回收连接”，从而腾出位置给新连接
+ * 如keep-alive的连接
  */
 void
 ngx_reusable_connection(ngx_connection_t *c, ngx_uint_t reusable)

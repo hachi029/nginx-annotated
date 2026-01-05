@@ -208,6 +208,7 @@ ngx_chain_get_free_buf(ngx_pool_t *p, ngx_chain_t **free)
 {
     ngx_chain_t  *cl;
 
+    //如果 *free 不为null, 则从free指向的链表中取出一个
     if (*free) {
         cl = *free;
         *free = cl->next;
@@ -215,12 +216,13 @@ ngx_chain_get_free_buf(ngx_pool_t *p, ngx_chain_t **free)
         return cl;
     }
 
+    //申请创建一个新的ngx_chain_t结构体
     cl = ngx_alloc_chain_link(p);
     if (cl == NULL) {
         return NULL;
     }
 
-    //创建ngx_chain_t结构体
+    //创建一个ngx_buf_t挂上去
     cl->buf = ngx_calloc_buf(p);
     if (cl->buf == NULL) {
         return NULL;
@@ -245,6 +247,21 @@ ngx_chain_get_free_buf(ngx_pool_t *p, ngx_chain_t **free)
  * 2.从头遍历busy链表，如果buf已经被消费完了(pos=last), 将其插入到free链表头部。直到遇到首个还有数据待消费的buf, 将busy指向这个buf
  * 
  * 在遍历busy链表时，如果发现某个节点的buf的tag和参数中的tag不一样，会将其free掉(ngx_chain_t插入pool->chain链表头部)
+ */
+/**
+ * buffer reuse
+ * https://nginx.org/en/docs/dev/development_guide.html#http_body_buffers_reuse
+ * 
+ * The free chain keeps all free buffers, which can be reused. 
+ * The busy chain keeps all buffers sent by the current module that are still in use by some other filter handler.
+ * A buffer is considered in use if its size is greater than zero. Normally, 
+ * when a buffer is consumed by a filter, its pos (or file_pos for a file buffer) is moved towards last (file_last for a file buffer)
+ * 
+ * Once a buffer is completely consumed, it's ready to be reused. To add newly freed buffers to the free chain 
+ * it's enough to iterate over the busy chain and move the zero size buffers at the head of it to free. 
+ * This operation is so common that there is a special function for it, ngx_chain_update_chains(free, busy, out, tag)
+ * 
+ * The function appends the output chain out to busy and moves free buffers from the top of busy to free
  */
 void
 ngx_chain_update_chains(ngx_pool_t *p, ngx_chain_t **free, ngx_chain_t **busy,

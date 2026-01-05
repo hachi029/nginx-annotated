@@ -335,6 +335,8 @@ typedef struct {
 typedef void (*ngx_http_client_body_handler_pt)(ngx_http_request_t *r);
 
 /**
+ * The function ngx_http_read_client_request_body(r, post_handler) allocates the request_body request field of type ngx_http_request_body_t
+ * 
  * 读取到的客户端请求体body保存到此结构体中, r->request_body成员
  * 
  * 保存请求体读取过程用到的缓存引用，临时文件引用，剩余请求体大小等信息
@@ -343,6 +345,7 @@ typedef void (*ngx_http_client_body_handler_pt)(ngx_http_request_t *r);
 typedef struct {
     // 指向储存请求体的临时文件的指针；
     ngx_temp_file_t                  *temp_file;    //不为NULL表示保存到了临时文件里
+    //keeps the result as a buffer chain
     //指向保存请求体的链表头；
     //当包体需要全部存放在内存中时，如果一块 ngx_buf_t缓冲区无法存放完，这时就需要使用 ngx_chain_t链表来存放
     //该链表最多可能有2个节点，每个节点为一个buffer，但是这个buffer的内容可能是保存在内存中，也可能是保存在磁盘文件中
@@ -360,6 +363,7 @@ typedef struct {
     ngx_http_chunked_t               *chunked;      //解析chunked请求
     //HTTP包体接收完毕后执行的回调方法，也就是 ngx_http_read_client_request_body 方法传递的第 2个参数
     ngx_http_client_body_handler_pt   post_handler;
+    //If a filter is planning to delay data buffers, it should set the flag r->request_body->filter_need_buffering to 1 when called for the first time
     unsigned                          filter_need_buffering:1;
     unsigned                          last_sent:1;
     unsigned                          last_saved:1;
@@ -708,21 +712,41 @@ struct ngx_http_request_s {
     //而每重写URL一次就把uri_changes减1，一旦uri_changes等于 0，则向用户返回失败
     unsigned                          uri_changes:4;    //记录uri变化的次数，最大值为11
 
+    /**
+     * The following fields of the request determine how the request body is read:
+    */
+
     //https://nginx.org/en/docs/http/ngx_http_core_module.html#client_body_in_single_buffer
     //save the entire client request body in a single buffer. 用于访问 $request_body 场景
+    // Read the body to a single memory buffer
     unsigned                          request_body_in_single_buf:1;
     //将请求体写入文件，没有相关配置项。如果此标志为1，则可以在r->request_body->temp_file->file中找到存储请求体的临时文件
+    //Always read the body to a file, even if fits in the memory buffer.
     unsigned                          request_body_in_file_only:1;
+    //Do not unlink the file immediately after creation. A file with this flag can be moved to another directory
     unsigned                          request_body_in_persistent_file:1;
+    //Unlink the file when the request is finalized. 
+    //This can be useful when a file was supposed to be moved to another directory but was not moved for some reason
     unsigned                          request_body_in_clean_file:1;
+    //Enable group access to the file by replacing the default 0600 access mask with 0660
     unsigned                          request_body_file_group_access:1;
+    //Severity level at which to log file errors.
     unsigned                          request_body_file_log_level:3;
     /**
      * https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_request_buffering
      * 控制是否对客户端请求体进行缓冲,不将请求体数据缓冲到内存或临时文件中，而是直接转发给后端服务器
      * proxy_request_buffering off;：禁用代理模块的请求体缓冲； 默认为on 即缓存请求体
      */
-    unsigned                          request_body_no_buffering:1;
+
+    /**
+     * The request_body_no_buffering flag enables the unbuffered mode of reading a request body. 
+     * In this mode, after calling ngx_http_read_client_request_body(), the bufs chain might keep only a part of the body. 
+     * To read the next part, call the ngx_http_read_unbuffered_request_body(r) function. 
+     * The return value NGX_AGAIN and the request flag reading_body indicate that more data is available. 
+     * If bufs is NULL after calling this function, there is nothing to read at the moment. 
+     * The request callback read_event_handler will be called when the next part of request body is available.
+     */
+    unsigned                          request_body_no_buffering:1;  //Read the request body without buffering
 
 
     /**
