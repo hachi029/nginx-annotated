@@ -3301,7 +3301,7 @@ ngx_http_set_disable_symlinks(ngx_http_request_t *r,
 
 /**
  * 从请求头中解析客户端真实ip
- * addr: 为出参
+ * addr: 为出参， 为c->connection->addr
  * heders: 为链表，支持多个同名请求头
  * value: 只支持单个请求头的场景，如x-real-ip
  * proxies: rlcf->from , 为set_real_ip_from配置指令的多个配置值

@@ -27,7 +27,7 @@
 typedef struct {
     //set_real_ip_from 配置，每个元素为 ngx_cidr_t*
     ngx_array_t       *from;        /* array of ngx_cidr_t */
-    ngx_uint_t         type;        //从哪个请求头解析客户端真实ip
+    ngx_uint_t         type;        //从哪个请求头(X-Real-IP或X-Forwarded-For或用户自定义的头)解析客户端真实ip
     ngx_uint_t         hash;        //header的hash
     ngx_str_t          header;      //其他请求头 当不是三个之一时：X-Real-IP X-Forwarded-For proxy_protocol 
     ngx_flag_t         recursive;   //real_ip_recursive on | off
@@ -42,6 +42,7 @@ typedef struct {
  */
 typedef struct {
     ngx_connection_t  *connection;      //与客户端的连接
+    //这个模块会用解析出来的结果替换c->sockaddr,c->socklen,c->addr_text。 而以下三个变量保存着原始的变量
     struct sockaddr   *sockaddr;        //原始连接的sockaddr
     socklen_t          socklen;         //原始连接的socklen
     ngx_str_t          addr_text;       //原始连接的addr_text
@@ -113,6 +114,12 @@ static ngx_http_module_t  ngx_http_realip_module_ctx = {
 };
 
 
+/**
+ * https://nginx.org/en/docs/http/ngx_http_realip_module.html
+ * 不是默认开启的模块
+ *
+ * 会将解析出来的ip替换变量$remote_addr。同时注册新的变量realip_remote_addr/realip_remote_port 保存原始的ip和端口
+ */
 ngx_module_t  ngx_http_realip_module = {
     NGX_MODULE_V1,
     &ngx_http_realip_module_ctx,           /* module context */
@@ -150,7 +157,7 @@ static ngx_http_variable_t  ngx_http_realip_vars[] = {
 
 
 /**
- * POST_READ_PHASE 和PREACCESS handler
+ * POST_READ_PHASE 和 PREACCESS handler
  * 
  * 在这两个阶段都会回调此handler
  */
@@ -267,7 +274,7 @@ found:
 
     c = r->connection;
 
-    //优先匹配对端ip
+    //优先匹配对端ip. addr是ngx_http_get_forwarded_addr()函数的出参
     addr.sockaddr = c->sockaddr;
     addr.socklen = c->socklen;
     /* addr.name = c->addr_text; */
@@ -325,7 +332,7 @@ ngx_http_realip_set_addr(ngx_http_request_t *r, ngx_addr_t *addr)
 
     ngx_memcpy(p, text, len);
 
-    //这个cleanup, 在请求结束时恢复连接上设置的sockaddr
+    //这个cleanup, 在请求结束时恢复连接上设置的 sockaddr
     cln->handler = ngx_http_realip_cleanup;
     //设置模块上下文
     ngx_http_set_ctx(r, ctx, ngx_http_realip_module);
@@ -336,7 +343,7 @@ ngx_http_realip_set_addr(ngx_http_request_t *r, ngx_addr_t *addr)
     ctx->socklen = c->socklen;
     ctx->addr_text = c->addr_text;
 
-    //将原始的sockaddr设置为解析出来的真实ip
+    //注意，这里将原始的远端地址替换为解析出的新地址, 参考$remote_addr的解析函数ngx_http_variable_remote_addr(), 就是直接取的 r->connection->addr_text
     c->sockaddr = addr->sockaddr;
     c->socklen = addr->socklen;
     c->addr_text.len = len;

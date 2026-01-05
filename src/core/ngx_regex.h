@@ -44,7 +44,7 @@ typedef struct {
  * 正则表达式编译时的传参，参考 ngx_http_regex_compile
  */
 typedef struct {
-    ngx_str_t     pattern;      //原始正则表达式
+    ngx_str_t     pattern;      // 原始正则表达式
     ngx_pool_t   *pool;         /* 编译正则表达式从哪分配内存 */
     ngx_uint_t    options;      //编译选项，如 NGX_REGEX_CASELESS
 
