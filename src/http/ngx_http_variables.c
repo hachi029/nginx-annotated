@@ -2682,9 +2682,9 @@ ngx_http_variable_connection_requests(ngx_http_request_t *r,
 
 
 /**
- * 解析变量 $connection_time 连接建立至今的时间
+ * 解析变量 $connection_time 开始建立连接至今的时间
  * 
- * 当前时间-建立连接时间
+ * 当前时间-开始建立连接时间， 参考方法 ngx_tcp_connect
  *  ngx_current_msec - r->connection->start_time
  */
 static ngx_int_t

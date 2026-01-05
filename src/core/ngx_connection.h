@@ -166,6 +166,8 @@ typedef enum {
 struct ngx_connection_s {
     //连接未使用时， data成员用于充当连接池中空闲连接链表中的 next指针。
     //当连接被使用时， data的意义由使用它的 Nginx模块而定，如在HTTP框架中， data指向 ngx_http_request_t请求
+    //Subrequests are related to the concept of active requests.
+    // A request r is considered active if c->data == r, where c is the client connection object
     void               *data;   //指向当前连接上的请求结构体ngx_http_request_t
     //连接对应的读事件
     ngx_event_t        *read;

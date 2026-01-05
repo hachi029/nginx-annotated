@@ -154,15 +154,17 @@ ngx_log_error_core(ngx_uint_t level, ngx_log_t *log, ngx_err_t err,
         p = ngx_log_errno(p, last, err);
     }
 
+    // log->handler 对于http请求为 ngx_http_log_error
     if (level != NGX_LOG_DEBUG && log->handler) {
         p = log->handler(log, p, last - p);
     }
 
+    // p不能超过last
     if (p > last - NGX_LINEFEED_SIZE) {
         p = last - NGX_LINEFEED_SIZE;
     }
 
-     // 添加回车换行
+     // 添加日志最后的回车换行, 至此日志字符串构建结束
     ngx_linefeed(p);
 
     wrote_stderr = 0;

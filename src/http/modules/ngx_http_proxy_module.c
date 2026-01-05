@@ -883,6 +883,7 @@ static ngx_http_module_t  ngx_http_proxy_module_ctx = {
     NULL,                                  /* merge server configuration */
 
     ngx_http_proxy_create_loc_conf,        /* create location configuration */
+    // 安装content_handler
     ngx_http_proxy_merge_loc_conf          /* merge location configuration */
 };
 

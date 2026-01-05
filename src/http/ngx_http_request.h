@@ -64,9 +64,12 @@
 
 /* unused                                  1 */
 //输出不会发送到客户端，而是存储在内存中。该标志仅影响由代理模块之一处理的子请求。在子请求完成后，它的输出信息保存在类型为 ngx_buf_t的 r->out变量中
+//Output is not sent to the client, but rather stored in memory. The flag only affects subrequests which are processed by one of the proxying modules. After a subrequest is finalized its output is available in r->out of type ngx_buf_t
 #define NGX_HTTP_SUBREQUEST_IN_MEMORY      2
+//The subrequest's done flag is set even if the subrequest is not active when it is finalized. This subrequest flag is used by the SSI filter
 //表示如果该子请求提前完成(按后序遍历的顺序)，是否设置将它的状态设为done，当设置该参数时，提前完成就会设置done，不设时，会让该子请求等待它之前的子请求处理完毕才会将状态设置为done
 #define NGX_HTTP_SUBREQUEST_WAITED         4
+//The subrequest is created as a clone of its parent. It is started at the same location and proceeds from the same phase as the parent request
 //子请求是作为其父的克隆而创建的。它是在同一位置开始的，并从与父级请求相同的阶段开始
 #define NGX_HTTP_SUBREQUEST_CLONE          8
 //创建后台子请求。此类子请求不参与主请求的响应构造，也就不会占用主请求的响应时间，但它依然会保持对主请求的引用
@@ -558,7 +561,7 @@ struct ngx_http_request_s {
     ngx_str_t                         uri;                  /* 客户请求中的uri, 不带args */
     ngx_str_t                         args;                 /* uri 中的参数 */
     ngx_str_t                         exten;                /* 客户请求的文件扩展名 */
-    //相当于$request_uri
+    //变量$request_uri: full original request URI (with arguments)
     ngx_str_t                         unparsed_uri;         /* 没经过URI 解码的原始请求uri字符串，带请求参数 */
 
     ngx_str_t                         method_name;          /* 方法名称字符串 */
@@ -572,10 +575,11 @@ struct ngx_http_request_s {
     */
     ngx_chain_t                      *out;
     //*当前请求既可能是用户发来的请求，也可能是派生出的子请求，
-    //而 main则标识一系列相关的派生子请求的原始请求，
+    //而 main则标识一系列相关的派生子请求的原始请求， contains a link to the main request in a group of requests.
     //一般可通过 main和当前请求的地址是否相等来判断当前请求是否为用户发来的原始请求
     ngx_http_request_t               *main;
     // 当前请求的父请求。注意，父请求未必是原始请求
+    //for a subrequest contains a link to its parent request and is NULL for the main request
     ngx_http_request_t               *parent;
     //是一个链表，每个节点是一个子请求产生的响应，用于保证子请求有序向客户端转发，参考ngx_http_postpone_filter_module模块
     //输出缓冲区和子请求的列表，按照它们发送和创建的顺序。当子请求创建时，该列表由postpone过滤器使用，以提供一致的请求输出

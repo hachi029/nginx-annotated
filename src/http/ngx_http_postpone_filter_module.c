@@ -33,6 +33,22 @@ static ngx_http_module_t  ngx_http_postpone_filter_module_ctx = {
 
 
 /**
+ * https://nginx.org/en/docs/dev/development_guide.html#http_subrequests
+ * 
+ * The output header in a subrequest is always ignored. 
+ * The ngx_http_postpone_filter places the subrequest's output body in the right position relative to other data produced by the parent request.
+ * 
+ * Subrequests are related to the concept of active requests. 
+ * A request r is considered active if c->data == r, where c is the client connection object. 
+ * At any given point, only the active request in a request group is allowed to output its buffers to the client. 
+ * An inactive request can still send its output to the filter chain, but it does not pass beyond the ngx_http_postpone_filter 
+ * and remains buffered by that filter until the request becomes active. Here are some rules of request activation:
+ *  1.Initially, the main request is active.
+ *  2.The first subrequest of an active request becomes active right after creation.
+ *  3.The ngx_http_postpone_filter activates the next request in the active request's subrequest list, once all data prior to that request are sent.
+ *  4.When a request is finalized, its parent is activated.
+ */
+/**
  * 是一个必选filter, 不能通过编译选项移除。实现子请求必不可少, 用来将子请求和主请求的输出链合并
  * 
  * 将子请求产生的数据按序放回父请求

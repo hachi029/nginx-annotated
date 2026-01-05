@@ -1162,6 +1162,10 @@ header_done:
 }
 
 
+/**
+ * ngx_http_v3_process_pseudo_header -> .
+ * ngx_http_v2_parse_path ->. 
+ */
 ngx_int_t
 ngx_http_parse_uri(ngx_http_request_t *r)
 {
@@ -1313,6 +1317,10 @@ ngx_http_parse_uri(ngx_http_request_t *r)
 }
 
 
+/**
+ * if "/.", "//", "%", and "\" (Win32) in URI , 会使用这个方法解析uri
+ * ngx_http_process_request_line -> ngx_http_process_request_uri -> .
+ */
 ngx_int_t
 ngx_http_parse_complex_uri(ngx_http_request_t *r, ngx_uint_t merge_slashes)
 {
@@ -1440,6 +1448,7 @@ ngx_http_parse_complex_uri(ngx_http_request_t *r, ngx_uint_t merge_slashes)
                 break;
 #endif
             case '/':
+                //前边已经有了一个/了，此时又遇到了一个/
                 if (!merge_slashes) {
                     *u++ = ch;
                 }

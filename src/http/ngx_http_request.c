@@ -1537,12 +1537,14 @@ ngx_http_process_request_uri(ngx_http_request_t *r)
         r->uri.len = r->uri_end - r->uri_start;
     }
 
+    // 当URI里有//、/.、%、#的情况
     if (r->complex_uri || r->quoted_uri || r->empty_path_in_uri) {
 
         if (r->empty_path_in_uri) {
             r->uri.len++;
         }
 
+        // 此处将uri重新复制一份，uri存放的是经解析过的请求uri，例如会将多个连续的/合并为一个/
         r->uri.data = ngx_pnalloc(r->pool, r->uri.len);
         if (r->uri.data == NULL) {
             ngx_http_close_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
@@ -1551,6 +1553,8 @@ ngx_http_process_request_uri(ngx_http_request_t *r)
 
         cscf = ngx_http_get_module_srv_conf(r, ngx_http_core_module);
 
+        // merge_slashes https://nginx.org/en/docs/http/ngx_http_core_module.html#merge_slashes
+        // 将多个连续的/合并为一个
         if (ngx_http_parse_complex_uri(r, cscf->merge_slashes) != NGX_OK) {
             r->uri.len = 0;
 
@@ -1564,6 +1568,7 @@ ngx_http_process_request_uri(ngx_http_request_t *r)
         r->uri.data = r->uri_start;
     }
 
+    //unparsed_uri存放的是原始请求的uri, 未经解析，且携带args参数
     r->unparsed_uri.len = r->uri_end - r->uri_start;
     r->unparsed_uri.data = r->uri_start;
 
@@ -3090,6 +3095,20 @@ ngx_http_post_request(ngx_http_request_t *r, ngx_http_posted_request_t *pr)
 }
 
 
+/**
+ * https://nginx.org/en/docs/dev/development_guide.html#http_request_finalization
+ * 
+ * An HTTP request is finalized by calling the function ngx_http_finalize_request(r, rc). 
+ * It is usually finalized by the content handler after all output buffers are sent to the filter chain. 
+ *  At this point all of the output might not be sent to the client, with some of it remaining buffered somewhere along the filter chain
+ * If it is, the ngx_http_finalize_request(r, rc) function automatically installs a special handler ngx_http_writer(r) to finish sending the output
+ * A request is also finalized in case of an error or if a standard HTTP response code needs to be returned to the client
+ * 
+ * NGX_DONE - Fast finalization. Decrement the request count and destroy the request if it reaches zero. The client connection can be used for more requests after the current request is destroyed.
+ * NGX_ERROR, NGX_HTTP_REQUEST_TIME_OUT (408), NGX_HTTP_CLIENT_CLOSED_REQUEST (499) - Error finalization. Terminate the request as soon as possible and close the client connection.
+ * NGX_HTTP_CREATED (201), NGX_HTTP_NO_CONTENT (204), codes greater than or equal to NGX_HTTP_SPECIAL_RESPONSE (300) - Special response finalization. For these values nginx either sends to the client a default response page for the code or performs the internal redirect to an error_page location if that is configured for the code.
+ * Other codes are considered successful finalization codes and might activate the request writer to finish sending the response body. Once the body is completely sent, the request count is decremented. If it reaches zero, the request is destroyed, but the client connection can still be used for other requests. If count is positive, there are unfinished activities within the request, which will be finalized at a later point.
+ */
 /**
  * 是开发HTTP模块时最常使用的结束请求方法
  * 参数r就是当前请求，它可能是派生出的子请求，也可能是客户端发来的原始请求。

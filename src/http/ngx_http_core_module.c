@@ -259,6 +259,8 @@ static ngx_command_t  ngx_http_core_commands[] = {
       offsetof(ngx_http_core_srv_conf_t, ignore_invalid_headers),
       NULL },
 
+      //https://nginx.org/en/docs/http/ngx_http_core_module.html#merge_slashes
+      // 是否合并uri里的双斜杠‘//’为单斜杠'/'
     { ngx_string("merge_slashes"),
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_CONF_FLAG,
       ngx_conf_set_flag_slot,
@@ -376,6 +378,7 @@ static ngx_command_t  ngx_http_core_commands[] = {
       offsetof(ngx_http_core_loc_conf_t, client_body_temp_path),
       NULL },
 
+      // https://nginx.org/en/docs/http/ngx_http_core_module.html#client_body_in_file_only
     { ngx_string("client_body_in_file_only"),
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
       ngx_conf_set_enum_slot,
@@ -2767,6 +2770,24 @@ ngx_http_gzip_quantity(u_char *p, u_char *last)
 #endif
 
 
+
+/**
+ * https://nginx.org/en/docs/dev/development_guide.html#http_subrequests
+ * 
+ * The output header in a subrequest is always ignored. 
+ * The ngx_http_postpone_filter places the subrequest's output body in the right position relative to other data produced by the parent request.
+ * 
+ * Subrequests are related to the concept of active requests. 
+ * A request r is considered active if c->data == r, where c is the client connection object. 
+ * At any given point, only the active request in a request group is allowed to output its buffers to the client. 
+ * An inactive request can still send its output to the filter chain, but it does not pass beyond the ngx_http_postpone_filter 
+ * and remains buffered by that filter until the request becomes active. Here are some rules of request activation:
+ *  1.Initially, the main request is active.
+ *  2.The first subrequest of an active request becomes active right after creation.
+ *  3.The ngx_http_postpone_filter activates the next request in the active request's subrequest list, once all data prior to that request are sent.
+ *  4.When a request is finalized, its parent is activated.
+ */
+
 /**
  * 使用subrequest的方式:
  * 1)启动subrequest子请求   ngx_http_subrequest
@@ -2777,14 +2798,18 @@ ngx_http_gzip_quantity(u_char *p, u_char *last)
  * 创建子请求,包括 创建子请求sr的 ngx_http_request_t，设置sr相关属性
  * r: 父请求
  * uri args 子请求参数
- * psr: 指针将生成的子请求传递出去
- * ps: 指出子请求结束后的回调方法
+ * psr: 指针将生成的子请求传递出去  is the output parameter, which receives the newly created subrequest reference
+ * ps: 指出子请求结束后的回调方法 for notifying the parent request that the subrequest is being finalized
  * flags: flag的取值范围包括：常用的为subrequest_in_memory。 
  * 1.0。在没有特殊需求的情况下都应该填写它； 
  * 2.NGX_HTTP_SUBREQUEST_IN_MEMORY。这个宏会将子请求的subrequest_in_memory标志位置为1，
  *      这意味着如果子请求使用upstream访问上游服务器，那么上游服务器的响应都将会在内存中处理；
+ *    Output is not sent to the client, but rather stored in memory. The flag only affects subrequests which are processed by one of the proxying modules. 
+ *    After a subrequest is finalized its output is available in r->out of type ngx_buf_t
  * 3.NGX_HTTP_SUBREQUEST_WAITED。表示如果该子请求提前完成(按后序遍历的顺序)，是否设置将它的状态设为done，当设置该参数时，提前完成就会设置done，
  *   不设时，会让该子请求等待它之前的子请求处理完毕才会将状态设置为done。
+ *   The subrequest's done flag is set even if the subrequest is not active when it is finalized. This subrequest flag is used by the SSI filter
+ * NGX_HTTP_SUBREQUEST_CLONE - The subrequest is created as a clone of its parent. It is started at the same location and proceeds from the same phase as the parent request.
  * 
  * 返回值：
  * NGX_OK:the subrequest finished without touching the network（成功建立子请求）；

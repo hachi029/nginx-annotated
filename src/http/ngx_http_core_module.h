@@ -136,6 +136,8 @@ typedef enum {
     // 在接收到完整的 HTTP头部后处理的 HTTP阶段
     NGX_HTTP_POST_READ_PHASE = 0,
 
+    //A subrequest starts in the NGX_HTTP_SERVER_REWRITE_PHASE phase. 
+    //It passes through the same subsequent phases as a normal request and is assigned a location based on its own URI
     //在将请求的URI与 location表达式匹配前，修改请求的 URI（所谓的重定向）是一个独立的 HTTP阶段
     //server级别的uri重写阶段，也就是该阶段执行处于server块内，location块外的重写指令，在读取请求头的过程中nginx会根据host及端口找到对应的虚拟主机配置；
     NGX_HTTP_SERVER_REWRITE_PHASE,
@@ -641,7 +643,7 @@ struct ngx_http_core_loc_conf_s {
     ngx_uint_t    if_modified_since;       /* if_modified_since */
     //max_ranges 配置指令值
     ngx_uint_t    max_ranges;              /* max_ranges */
-    //client_body_in_file_only 配置指令值
+    //client_body_in_file_only 配置指令值  https://nginx.org/en/docs/http/ngx_http_core_module.html#client_body_in_file_only
     //设置是否总是将请求体保存在临时文件中，默认为off
     //当此指定被设置为on时，即使客户端显式指示了请求体长度为0时，nginx还是会为请求创建一个临时文件。
     ngx_uint_t    client_body_in_file_only; /* client_body_in_file_only */
