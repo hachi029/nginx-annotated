@@ -11,6 +11,11 @@
 
 
 /**
+ * The global timeout red-black tree ngx_event_timer_rbtree stores all timeouts currently set
+ * The key in the tree is of type ngx_msec_t and is the time when the event occurs.
+ * The tree structure enables fast insertion and deletion operations, as well as access to the nearest timeouts, 
+ * which nginx uses to find out how long to wait for I/O events and for expiring timeout events.
+ * 
  * 所有定时器事件组成的红黑树,红黑树中的每个节点都是ngx_event_t事件中的timer成员
  * 而ngx_rbtree_node_t节点的 关键字就是事件的超时时间，以这个超时时间的大小组成了二叉排序树
  * 该红黑树中最左边的节点代表最可能超时的事件

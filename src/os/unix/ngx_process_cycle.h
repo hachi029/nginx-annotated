@@ -30,13 +30,16 @@
 
 //进程类型 https://nginx.org/en/docs/dev/development_guide.html#Processes
 
+//The single process,  
 //单进程模式，master_process off; 是此模式下唯一存在的进程。处理函数是ngx_single_process_cycle()
 #define NGX_PROCESS_SINGLE     0
 //master进程, 处理函数 ngx_master_process_cycle 
+//The master process reads the NGINX configuration, creates cycles, and starts and controls child processes. It does not perform any I/O and responds only to signals
 #define NGX_PROCESS_MASTER     1
 //只是一个发送信号的进程. nginx -s stop
 #define NGX_PROCESS_SIGNALLER  2
 //worker进程, 处理函数 ngx_worker_process_cycle
+//handles client connections
 #define NGX_PROCESS_WORKER     3
 //辅助进程. 如cache manager、cache loader等, 两者的处理函数是ngx_cache_manager_process_cycle()
 #define NGX_PROCESS_HELPER     4

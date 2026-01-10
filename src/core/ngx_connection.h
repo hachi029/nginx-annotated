@@ -156,6 +156,24 @@ typedef enum {
 
 
 /**
+ * https://nginx.org/en/docs/dev/development_guide.html#connection
+ * 
+ * The worker_connections directive in the nginx configuration limits the number of connections per nginx worker. 
+ *  All connection structures are precreated when a worker starts and stored in the connections field of the cycle object. 
+ *  To retrieve a connection structure, use the ngx_get_connection(s, log) function. 
+ *  It takes as its s argument a socket descriptor, which needs to be wrapped in a connection structure.
+ * 
+ * Because the number of connections per worker is limited, nginx provides a way to grab connections that are currently in use.
+ *  To enable or disable reuse of a connection, call the ngx_reusable_connection(c, reusable) function.
+ *  Calling ngx_reusable_connection(c, 1) sets the reuse flag in the connection structure and inserts the connection into the reusable_connections_queue of the cycle
+ *  Whenever ngx_get_connection() finds out there are no available connections in the cycle's free_connections list, 
+ *  it calls ngx_drain_connections() to release a specific number of reusable connections.
+ *  For each such connection, the close flag is set and its read handler is called which is supposed to free the connection by calling ngx_close_connection(c) and make it available for reuse.
+ *  To exit the state when a connection can be reused ngx_reusable_connection(c, 0) is called
+ * HTTP client connections are an example of reusable connections in nginx; 
+ * they are marked as reusable until the first request byte is received from the client.
+ */
+/**
  * 是对socket套接字的封装
  * 
  * 每一个用户请求至少对应着一个TCP连接，为了及时处理这个连接， 至少需要一个读事件和一个写事件
@@ -164,18 +182,22 @@ typedef enum {
  * 在启动阶段就预分配好的，使用时从连接池中获取即可
  */
 struct ngx_connection_s {
+    //Arbitrary connection context. Normally, it is a pointer to a higher-level object built on top of the connection, such as an HTTP request or a Stream session.
     //连接未使用时， data成员用于充当连接池中空闲连接链表中的 next指针。
     //当连接被使用时， data的意义由使用它的 Nginx模块而定，如在HTTP框架中， data指向 ngx_http_request_t请求
     //Subrequests are related to the concept of active requests.
     // A request r is considered active if c->data == r, where c is the client connection object
     void               *data;   //指向当前连接上的请求结构体ngx_http_request_t
+    //read, write — Read and write events for the connection.
     //连接对应的读事件
     ngx_event_t        *read;
     //连接对应的写事件
     ngx_event_t        *write;
 
+    //Socket descriptor
     ngx_socket_t        fd;     // socket的套接字描述符
 
+    //recv, send, recv_chain, send_chain — I/O operations for the connection.
     /* 接收网络字符流的方法，是一个函数指针，指向接收函数 */
     // 对于http为 ngx_recv; 对于https为 ngx_ssl_recv
     ngx_recv_pt         recv;
@@ -201,10 +223,12 @@ struct ngx_connection_s {
     //内存池。一般在accept一个新连接时，会创建一个内存池，而在这个连接结束时会销毁内存池。
     //注意，这里所说的连接是指成功建立的 TCP连接，所有的 ngx_connection_t结构体都是预分配的。
     //这个内存池的大小将由上面的 listening监听对象中的 pool_size成员决定
+    //Connection pool.
     ngx_pool_t         *pool;   
 
     int                 type;
 
+    //sockaddr, socklen, addr_text — Remote socket address in binary and text forms.
      //以下三个字段分别为 对端socket 地址二进制格式及长度和文本格式
     struct sockaddr    *sockaddr;
     socklen_t           socklen;    // sockaddr结构体的长度
@@ -219,13 +243,20 @@ struct ngx_connection_s {
 #endif
 
 #if (NGX_SSL || NGX_COMPAT)
-     // 链接的 SSL 信息.
+    /**
+     * An nginx connection can transparently encapsulate the SSL layer. 
+     * In this case the connection's ssl field holds a pointer to an ngx_ssl_connection_t structure, keeping all SSL-related data for the connection, including SSL_CTX and SSL. 
+     * The recv, send, recv_chain, and send_chain handlers are set to SSL-enabled functions as well.
+     */
+     // 链接的 SSL 信息. SSL context for the connection.
     ngx_ssl_connection_t  *ssl;
 #endif
 
     ngx_udp_connection_t  *udp;
 
-    // //本地socket地址二进制格式及长度。初始化为空, 使用 ngx_connection_local_sockaddr() 获取. 也就是 listening监听对象中的sockaddr成员
+    //local_sockaddr, local_socklen — Local socket address in binary form. Initially, these fields are empty. 
+    // Use the ngx_connection_local_sockaddr() function to get the local socket address.
+    //本地socket地址二进制格式及长度。初始化为空, 使用 ngx_connection_local_sockaddr() 获取. 也就是 listening监听对象中的sockaddr成员
     struct sockaddr    *local_sockaddr; 
     socklen_t           local_socklen;
 
@@ -263,9 +294,11 @@ struct ngx_connection_s {
 
     //标志位，为 1时表示连接处于空闲状态，如 keepalive请求中两次请求之间的状态
     unsigned            idle:1;
+    // Flag indicating the connection is in a state that makes it eligible for reuse.
     //标志位，为 1时表示连接可重用，它与上面的 queue字段是对应使用的
     unsigned            reusable:1;
     // 标志位，为 1时表示连接关闭
+    //Flag indicating that the connection is being reused and needs to be closed.
     unsigned            close:1;
     unsigned            shared:1;
 

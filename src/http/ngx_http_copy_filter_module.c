@@ -70,6 +70,7 @@ static ngx_http_module_t  ngx_http_copy_filter_module_ctx = {
 
 
 /**
+ * reads the data for other filter modules and is placed near the bottom of the list so that it is one of the first to be executed
  * https://www.kancloud.cn/kancloud/master-nginx-develop/51865
  * 
  * https://tengine.taobao.org/book/chapter_12.html#ngx-http-copy-filter-module

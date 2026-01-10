@@ -410,6 +410,9 @@ ngx_chain_to_iovec(ngx_iovec_t *vec, ngx_chain_t *cl)
 }
 
 
+/**
+ * 写文件
+ */
 static ssize_t
 ngx_writev_file(ngx_file_t *file, ngx_iovec_t *vec, off_t offset)
 {

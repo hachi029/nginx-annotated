@@ -17,6 +17,8 @@ static void ngx_drain_connections(ngx_cycle_t *cycle);
 
 
 /**
+ * Listening objects are normally added by the listen directive of different modules which call the ngx_create_listening() function
+ * 
  * 创建并初始化一个ngx_listening_t， 并将其加入到cycle->listening动态数组中
  * 
  * 根据二进制格式的sockaddr 设置ngx_listening_t的文本格式地址addr_text
@@ -1416,6 +1418,17 @@ ngx_close_connection(ngx_connection_t *c)
 }
 
 
+/**
+ *  Because the number of connections per worker is limited, nginx provides a way to grab connections that are currently in use.
+ *  To enable or disable reuse of a connection, call the ngx_reusable_connection(c, reusable) function.
+ *  Calling ngx_reusable_connection(c, 1) sets the reuse flag in the connection structure and inserts the connection into the reusable_connections_queue of the cycle
+ *  Whenever ngx_get_connection() finds out there are no available connections in the cycle's free_connections list, 
+ *  it calls ngx_drain_connections() to release a specific number of reusable connections.
+ *  For each such connection, the close flag is set and its read handler is called which is supposed to free the connection by calling ngx_close_connection(c) and make it available for reuse.
+ *  To exit the state when a connection can be reused ngx_reusable_connection(c, 0) is called
+ * 
+ * HTTP client connections are an example of reusable connections in nginx; they are marked as reusable until the first request byte is received from the client.
+ */
 /**
  * ngx_cycle的 reusable_connections_n 计数
  * 

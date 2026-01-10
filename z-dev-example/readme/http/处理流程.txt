@@ -1,6 +1,8 @@
+ref:  https://nginx.org/en/docs/dev/development_guide.html#http_connection
+
 Each HTTP client connection runs through the following stages:
 
-1.ngx_event_accept() 接受客户端TCP连接。该处理程序是为了响应在收听socket上的接入请求而调用。在此阶段创建一个新的ngx_http_connection_t对象，其包装新接收的客户端套接字。每个nginx侦听服务都提供了一个对新连接对象的处理程序。对于HTTP连接，它ngx_http_init_connection()。
+1.ngx_event_accept() 接受客户端TCP连接。该处理程序是为了响应在收听socket上的接入请求而调用。在此阶段创建一个新的ngx_connection_t对象，其包装新接收的客户端套接字。每个nginx侦听服务都提供了一个对新连接对象的处理程序。对于HTTP连接，它ngx_http_init_connection()。
 2.ngx_http_init_connection() 执行了HTTP connection的早期初始化工作。在这个阶段创建了ngx_http_connection_t对象，存储在 connection 的 data字段中 ，之后它将被HTTP request object 结构替代。 PROXY protocol 解析 和SSL握手也是在这个阶段开始。
 3.ngx_http_wait_request_handler()  读取事件处理程序在客户端套接字上可用时调用。在此阶段，HTTP请求对象 ngx_http_request_t 将创建, 并保存在connection的data字段。
 4.ngx_http_process_request_line()读取客户端请求，将数据读取到 connection的缓冲区中。缓冲区的大小最初是由指令client_header_buffer_size设置的。整个客户标头应该适合缓冲区。如果初始大小还不够，则分配较大的缓冲区，并由大large_client_header_buffers指令设置。
@@ -8,3 +10,12 @@ Each HTTP client connection runs through the following stages:
 6.ngx_http_core_run_phases() 在请求头被完全读取并解析后被调用。这个函数运行阶段从 NGX_HTTP_POST_READ_PHASE 到 NGX_HTTP_CONTENT_PHASE. 最后一个阶段旨在生成响应并沿过滤器链传递。响应不一定在此阶段发送给客户。它可能保持在缓冲中，并在最终阶段发送。
 7.ngx_http_finalize_request()当请求结束或产生错误时被调用。在后一种情况下，查找适当的错误页面并将其用作响应。如果此时有响应信息未发送，则激活HTTP Writer ngx_http_writer()完成数据发送。
 8.ngx_http_finalize_connection() 当响应被完全发送到客户端请求结构可以被释放， 如果客户端使用keepalive，ngx_http_set_keepalive() 将被调用，释放当前请求结构，并在连接上等待下一个请求。否则，ngx_http_close_request() 会释放请求和连接相关结构。
+
+1.ngx_event_accept() 建立连接，创建 ngx_connection_t。如果是http连接， 回调ngx_http_init_connection
+2.ngx_http_init_connection() 初始化http连接，创建ngx_http_connection_t。处理PROXY和SSL协议；
+3.ngx_http_wait_request_handler() 开启读取首字节数据，创建ngx_http_request_t对象。
+4.ngx_http_process_request_line() 解析请求行， 将数据读取到 connection的缓冲区中。缓冲区的大小最初是由指令client_header_buffer_size设置的。整个客户标头应该适合缓冲区。如果初始大小还不够，则分配较大的缓冲区，并由大large_client_header_buffers指令设置。
+5.ngx_http_process_request_headers() 解析请求头，
+6.ngx_http_core_run_phases() 执行各阶段handler。当请求头被完全读取完后。从NGX_HTTP_POST_READ_PHASE 到 NGX_HTTP_CONTENT_PHASE 执行各阶段。NGX_HTTP_CONTENT_PHASE应该生成响应体。
+7.ngx_http_finalize_request() 结束请求
+8.ngx_http_finalize_connection() 释放连接。或保持keepalive

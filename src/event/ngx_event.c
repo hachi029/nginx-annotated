@@ -275,6 +275,20 @@ ngx_module_t  ngx_event_core_module = {
 
 
 /**
+ * https://nginx.org/en/docs/dev/development_guide.html#event_loop
+ * steps:
+ * 1. Find the timeout that is closest to expiring, by calling ngx_event_find_timer(). 
+ *    This function finds the leftmost node in the timer tree and returns the number of milliseconds until the node expires.
+ * 2. Process I/O events by calling a handler, specific to the event notification mechanism, chosen by nginx configuration. 
+ *    This handler waits for at least one I/O event to happen, but only until the next timeout expires. 
+ *    When a read or write event occurs, the ready flag is set and the event's handler is called. 
+ *    For Linux, the ngx_epoll_process_events() handler is normally used, which calls epoll_wait() to wait for I/O events.
+ * 3. Expire timers by calling ngx_event_expire_timers(). 
+ *    The timer tree is iterated from the leftmost element to the right until an unexpired timeout is found. 
+ *    For each expired node the timedout event flag is set, the timer_set flag is reset, and the event handler is called
+ * 4. Process posted events by calling ngx_event_process_posted(). The function repeatedly removes the first element from the posted events queue and calls the element's handler, until the queue is empty.
+ */
+/**
  * 每个worker进程都在ngx_worker_process_cycle方法中循环处理事件
  * 
  * 此方法就是Nginx实际上处理Web服务的方法，所有业务的执行都 是由它开始的
@@ -395,6 +409,17 @@ ngx_process_events_and_timers(ngx_cycle_t *cycle)
 }
 
 
+/**
+ * https://nginx.org/en/docs/dev/development_guide.html#i_o_events
+ * Each connection obtained by calling the ngx_get_connection() function has two attached events, c->read and c->write.
+ * which are used for receiving notification that the socket is ready for reading or writing. 
+ * 
+ * All such events operate in Edge-Triggered mode, meaning that they only trigger notifications when the state of the socket changes.
+ * For example, doing a partial read on a socket does not make nginx deliver a repeated read notification until more data arrives on the socket.
+ *  Even when the underlying I/O notification mechanism is essentially Level-Triggered (poll, select etc), nginx converts the notifications to Edge-Triggered.
+ * To make nginx event notifications consistent across all notifications systems on different platforms, 
+ * the functions ngx_handle_read_event(rev, flags) and ngx_handle_write_event(wev, lowat) must be called after handling an I/O socket notification or calling any I/O functions on that socket
+ */
 /**
  * 将读事件加入epoll
  * 将读事件添加到事件驱动模块中，这样该事件对应的TCP连接上一旦出现可读事件，就会调用该事件上的handler方法

@@ -1600,6 +1600,7 @@ ngx_http_update_location_config(ngx_http_request_t *r)
         r->connection->tcp_nopush = NGX_TCP_NOPUSH_DISABLED;
     }
 
+    //设置 content_handler 
     if (clcf->handler) {
         r->content_handler = clcf->handler;
     }
@@ -5619,6 +5620,8 @@ ngx_http_core_set_aio(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
 
 /**
+ * https://nginx.org/en/docs/http/ngx_http_core_module.html#directio
+ * Syntax:	directio size | off;
  * directio 配置指令解析
  */
 static char *

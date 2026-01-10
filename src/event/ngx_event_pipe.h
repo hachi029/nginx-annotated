@@ -61,7 +61,7 @@ struct ngx_event_pipe_s {
      */
 
     //处理接收到的来自上游服务器的缓冲区。
-    //一般使用 upstream机制默认提供的 ngx_event_pipe_copy_input_filter方法作为 input_filter  
+    //一般使用 upstream机制默认提供的 ngx_event_pipe_copy_input_filter 方法作为 input_filter  
     ngx_event_pipe_input_filter_pt    input_filter;
     //用于 input_filter方法的成员，一般将它设置为 ngx_http_request_t结构体的地址
     void                             *input_ctx;

@@ -30,6 +30,7 @@ static ngx_http_module_t  ngx_http_write_filter_module_ctx = {
 
 
 /**
+ * writes the data to the client socket and is placed near the top of the list, and is the last to be executed
  * 该模块负责向客户端发送HTTP响应
  * 作为body_filter的最后一个filter节点
  */

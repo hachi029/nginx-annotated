@@ -663,6 +663,7 @@ ngx_http_upstream_init_request(ngx_http_request_t *r)
             return;
         }
 
+        //查询到缓存
         if (rc == NGX_OK) {
             rc = ngx_http_upstream_cache_send(r, u);
 
@@ -1428,6 +1429,8 @@ failed:
 
 
 /**
+ *  c->write->handler = ngx_http_upstream_handler;
+    c->read->handler = ngx_http_upstream_handler;
  * 与上游服务器建立连接后的读写事件回调都是这个方法
  */
 static void
@@ -1454,7 +1457,7 @@ ngx_http_upstream_handler(ngx_event_t *ev)
     }
 
     if (ev->write) {
-        u->write_event_handler(r, u);   // 实际是ngx_http_upstream_send_request_handler;
+        u->write_event_handler(r, u);   // 实际是 ngx_http_upstream_send_request_handler;
 
     } else {
         u->read_event_handler(r, u);    // 实际是 ngx_http_upstream_process_header
@@ -2460,7 +2463,8 @@ ngx_http_upstream_send_request_body(ngx_http_request_t *r,
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "http upstream send request body");
 
-    if (!r->request_body_no_buffering) {  //
+    //buffering
+    if (!r->request_body_no_buffering) {
 
         /* buffered request body */
 

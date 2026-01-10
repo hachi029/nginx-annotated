@@ -623,6 +623,7 @@ struct ngx_http_core_loc_conf_s {
 
     //client_max_body_size 配置指令值
     off_t         client_max_body_size;    /* client_max_body_size */
+    //directio 配置指令值
     off_t         directio;                /* directio */
     //directio_alignment 配置指令值
     off_t         directio_alignment;      /* directio_alignment */
@@ -693,7 +694,7 @@ struct ngx_http_core_loc_conf_s {
     //client_body_in_single_buffer 配置指令值
     //指示是否将请求体完整的存储在一块连续的内存中，默认为off，
     //如果此指令被设置为on，则nginx会保证请求体在不大于client_body_buffer_size设置的值时，被存放在一块连续的内存中，
-    //但超过大小时会被整个写入一个临时文件;
+    //但超过大小时会被整个写入一个临时文件; 使用场景如：简化变量读取与处理，$request_body获取
     ngx_flag_t    client_body_in_single_buffer;
                                            /* client_body_in_singe_buffer */
     ngx_flag_t    internal;                /* internal */

@@ -337,6 +337,34 @@ typedef struct {
 
 typedef void (*ngx_http_client_body_handler_pt)(ngx_http_request_t *r);
 
+
+/**
+ * Each HTTP client connection runs through the following stages:
+ *  ngx_event_accept() accepts a client TCP connection. This handler is called in response to a read notification on a listen socket. 
+ *           A new ngx_connection_t object is created at this stage to wrap the newly accepted client socket. 
+ *           Each nginx listener provides a handler to pass the new connection object to. For HTTP connections it's ngx_http_init_connection(c).
+ *  ngx_http_init_connection() performs early initialization of the HTTP connection. 
+ *           At this stage an ngx_http_connection_t object is created for the connection and its reference is stored in the connection's data field.
+ *           Later it will be replaced by an HTTP request object. A PROXY protocol parser and the SSL handshake are started at this stage as well.
+ *  ngx_http_wait_request_handler() read event handler is called when data is available on the client socket. 
+ *            At this stage an HTTP request object ngx_http_request_t is created and set to the connection's data field.
+ *  ngx_http_process_request_line() read event handler reads client request line. The handler is set by ngx_http_wait_request_handler(). 
+ *           The data is read into connection's buffer. The size of the buffer is initially set by the directive client_header_buffer_size. 
+ *           The entire client header is supposed to fit in the buffer. If the initial size is not sufficient, a bigger buffer is allocated, with the capacity set by the large_client_header_buffers directive.
+ *  ngx_http_process_request_headers() read event handler, is set after ngx_http_process_request_line() to read the client request header.
+ *  ngx_http_core_run_phases() is called when the request header is completely read and parsed. 
+ *          This function runs request phases from NGX_HTTP_POST_READ_PHASE to NGX_HTTP_CONTENT_PHASE. 
+ *         The last phase is intended to generate a response and pass it along the filter chain. 
+ *         The response is not necessarily sent to the client at this phase. It might remain buffered and be sent at the finalization stage.
+ *  ngx_http_finalize_request() is usually called when the request has generated all the output or produced an error. 
+ *         In the latter case an appropriate error page is looked up and used as the response. 
+ *         If the response is not completely sent to the client by this point, an HTTP writer ngx_http_writer() is activated to finish sending outstanding data.
+ *  ngx_http_finalize_connection() is called when the complete response has been sent to the client and the request can be destroyed. 
+ *         If the client connection keepalive feature is enabled, ngx_http_set_keepalive() is called, which destroys the current request and waits for the next request on the connection. 
+ *         Otherwise, ngx_http_close_request() destroys both the request and the connection.
+ * 
+ */
+
 /**
  * The function ngx_http_read_client_request_body(r, post_handler) allocates the request_body request field of type ngx_http_request_body_t
  * 
@@ -482,13 +510,38 @@ typedef ngx_int_t (*ngx_http_handler_pt)(ngx_http_request_t *r);
 typedef void (*ngx_http_event_handler_pt)(ngx_http_request_t *r);
 
 
+/**
+ * For each client HTTP request the ngx_http_request_t object is created
+ */
 struct ngx_http_request_s {
     uint32_t                          signature;         /* "HTTP" */
 
+    /**
+     * Pointer to a ngx_connection_t client connection object
+     * Several requests can reference the same connection object at the same time - one main request and its subrequests
+     * After a request is deleted, a new request can be created on the same connection
+     */
+    /**
+     * Note that for HTTP connections ngx_connection_t's data field points back to the request.
+     * Such requests are called active, as opposed to the other requests tied to the connection.
+     * An active request is used to handle client connection events and is allowed to output its response to the client
+     * Normally, each request becomes active at some point so that it can send its output
+     */
     ngx_connection_t                 *connection;   // 这个请求对应的客户端连接
 
+    /**
+     * Array of HTTP module contexts
+     * Each module of type NGX_HTTP_MODULE can store any value (normally, a pointer to a structure) in the request
+     * The value is stored in the ctx array at the module's ctx_index position
+     *   ngx_http_get_module_ctx(r, module) — Returns the module's context
+     *   ngx_http_set_ctx(r, c, module) — Sets c as the module's context
+     */
     //指向每个HTTP模块的自定义上下文结构体的数组. 数组的元素个数为ngx_http_max_module
     void                            **ctx;
+    /**
+     * main_conf, srv_conf, loc_conf 
+     *  — Arrays of current request configurations. Configurations are stored at the module's ctx_index positions.
+     */
     void                            **main_conf;    // 指向请求对应的存放 main级别配置结构体的指针数组
     void                            **srv_conf;     // 指向请求对应的存放 srv级别配置结构体的指针数组
     /**
@@ -506,6 +559,12 @@ struct ngx_http_request_s {
      * */ 
     void                            **loc_conf;     // 指向请求对应的存放 loc级别配置结构体的指针数组
 
+    /**
+     * read_event_handler, write_event_handler - Read and write event handlers for the request. 
+     * Normally, both the read and write event handlers for an HTTP connection are set to ngx_http_request_handler(). 
+     * 
+     * This function calls the read_event_handler and write_event_handler handlers for the currently active request.
+     */
     /**
      * 通常，HTTP连接的读取和写入事件处理程序都设置为 ngx_http_request_handler()。
      * 
@@ -527,10 +586,14 @@ struct ngx_http_request_s {
      */
     ngx_http_event_handler_pt         write_event_handler;
 
+    /**
+     * Request cache object for caching the upstream response.
+     */
 #if (NGX_HTTP_CACHE)
     ngx_http_cache_t                 *cache;
 #endif
 
+    //Request upstream object for proxying.
     //使用upstream机制时，需要创建此结构体，并正确设置其conf配置结构体(ngx_http_upstream_conf_t类型)
     ngx_http_upstream_t              *upstream;
     //用于记录与一个上游服务器的交互状态
@@ -538,15 +601,26 @@ struct ngx_http_request_s {
     ngx_array_t                      *upstream_states;
                                          /* of ngx_http_upstream_state_t */
 
+    /**
+     * Request pool. The request object itself is allocated in this pool, which is destroyed when the request is deleted. 
+     * 
+     * For allocations that need to be available throughout the client connection's lifetime, use ngx_connection_t's pool instead.
+     */
     //表示这个请求的内存池，在ngx_http_free_request方法中销毁。
     //它与 ngx_connection_t中的内存池意义不同，当请求释放时， 
     //TCP连接可能并没有关闭，这时请求的内存池会销毁，但 ngx_connection_t的内存池并不会销毁
     ngx_pool_t                       *pool;
+    //Buffer into which the client HTTP request header is read.
     //用于接收 HTTP请求内容的缓冲区，主要用于接收HTTP请求的请求行和请求头部。
     // 如果这个缓冲区满了,  会调用ngx_http_alloc_large_header_buffer 分配更大的缓冲区
     //  ngx_http_parse_request_line(r, r->header_in);
     ngx_buf_t                        *header_in;
 
+    /**
+     * headers_in, headers_out — Input and output HTTP headers objects. 
+     * Both objects contain the headers field of type ngx_list_t for keeping the raw list of headers. 
+     * In addition to that, specific headers are available for getting and setting as separate fields, for example content_length_n, status etc
+     */
     //ngx_http_process_request_headers方法在接收、解析完 HTTP请求的头部后，
     //会把解析完的每一个 HTTP头部加入到 headers_in的 headers链表中，同时会构造 headers_in中的其他成员
     ngx_http_headers_in_t             headers_in;
@@ -554,23 +628,39 @@ struct ngx_http_request_s {
     //只要将将响应头放入此字段，调用ngx_http_send_header方法就可以将响应头发送给客户端
     ngx_http_headers_out_t            headers_out;
 
+    //Client request body object.
     // 接收HTTP请求中包体的数据结构
     ngx_http_request_body_t          *request_body;
 
     //延迟关闭连接的时间
     time_t                            lingering_time;
 
+    /**
+     * start_sec, start_msec — Time point when the request was created, used for tracking request duration
+     */
     //如果这个请求是子请求，则该时间是子请求的生成时间；
     //如果这个请求是用户发来的请求，则是在建立起TCP连接后，第一次接收到可读事件时的时间
     time_t                            start_sec;    //请求结构体创建时间 sec
     ngx_msec_t                        start_msec;   //请求结构体创建时间 msec
 
+    /**
+     * method, method_name — Numeric and text representation of the client HTTP request method. 
+     * Numeric values for methods are defined in src/http/ngx_http_request.h with the macros NGX_HTTP_GET, NGX_HTTP_HEAD, NGX_HTTP_POST, etc
+     */
     /*
-     * 以下的 9 个成员是函数ngx_http_process_request_line在接收、解析http请求行时解析出的信息 */
+     * 以下的 9 个成员是函数 ngx_http_process_request_line 在接收、解析http请求行时解析出的信息 */
     ngx_uint_t                        method;               /* 方法名称 */
+    //Client HTTP protocol version in numeric form (NGX_HTTP_VERSION_10, NGX_HTTP_VERSION_11, etc.)
     ngx_uint_t                        http_version;         /* 协议版本 */
 
+    //request_line, unparsed_uri — Request line and URI in the original client request
     ngx_str_t                         request_line;         //表示请求行
+    /**
+     * uri, args, exten — URI, arguments and file extension for the current request. 
+     * The URI value here might differ from the original URI sent by the client due to normalization. 
+     * 
+     * Throughout request processing, these values can change as internal redirects are performed
+     */
     ngx_str_t                         uri;                  /* 客户请求中的uri, 不带args */
     ngx_str_t                         args;                 /* uri 中的参数 */
     ngx_str_t                         exten;                /* 客户请求的文件扩展名 */
@@ -578,6 +668,7 @@ struct ngx_http_request_s {
     ngx_str_t                         unparsed_uri;         /* 没经过URI 解码的原始请求uri字符串，带请求参数 */
 
     ngx_str_t                         method_name;          /* 方法名称字符串 */
+    //Client HTTP protocol version in its original text form (“HTTP/1.0”, “HTTP/1.1” etc)
     ngx_str_t                         http_protocol;        /* 其data成员指向请求中http的起始地址 */
     ngx_str_t                         schema;
 
@@ -587,21 +678,44 @@ struct ngx_http_request_s {
      * 在调用 ngx_http_output_filter方法后， out中还会保存待发送的 HTTP包体，它是实现异步发送 HTTP响应的关键
     */
     ngx_chain_t                      *out;
+    /**
+     * Pointer to a main request object. 
+     * This object is created to process a client HTTP request, as opposed to subrequests, which are created to perform a specific subtask within the main request
+     */
     //*当前请求既可能是用户发来的请求，也可能是派生出的子请求，
     //而 main则标识一系列相关的派生子请求的原始请求， contains a link to the main request in a group of requests.
     //一般可通过 main和当前请求的地址是否相等来判断当前请求是否为用户发来的原始请求
     ngx_http_request_t               *main;
     // 当前请求的父请求。注意，父请求未必是原始请求
+    //Pointer to the parent request of a subrequest.
     //for a subrequest contains a link to its parent request and is NULL for the main request
     ngx_http_request_t               *parent;
+    /**
+     * List of output buffers and subrequests, in the order in which they are sent and created. 
+     * The list is used by the postpone filter to provide consistent request output when parts of it are created by subrequests.
+     */
     //是一个链表，每个节点是一个子请求产生的响应，用于保证子请求有序向客户端转发，参考ngx_http_postpone_filter_module模块
     //输出缓冲区和子请求的列表，按照它们发送和创建的顺序。当子请求创建时，该列表由postpone过滤器使用，以提供一致的请求输出
     ngx_http_postponed_request_t     *postponed;
 
+    /**
+     *  Pointer to a handler with the context to be called when a subrequest gets finalized. Unused for main requests.
+     */
     //https://tengine.taobao.org/book/chapter_12.html#subrequest-99
     //每个子请求结束时的回调函数，组成一个链表
     //如果是子请求，结束时会调用此字段里的handler。 参考：ngx_http_finalize_request
     ngx_http_post_subrequest_t       *post_subrequest;
+    /**
+     * List of requests to be started or resumed, which is done by calling the request's write_event_handler. 
+     * Normally, this handler holds the request main function, which at first runs request phases and then produces the output.
+     * 
+     * A request is usually posted by the ngx_http_post_request(r, NULL) call.
+     * It is always posted to the main request posted_requests list.
+     * 
+     * The function ngx_http_run_posted_requests(c) runs all requests that are posted in the main request of the passed connection's active request
+     * 
+     * All event handlers call ngx_http_run_posted_requests, which can lead to new posted requests. Normally, it is called after invoking a request's read or write handler
+     */
     //所有的子请求(request)都是通过 posted_requests 这个单链表来连接起来的，
     //执行 post子请求时调用的 ngx_http_run_posted_requests 方法就是通过遍历该单链表来执行子请求的
     /**
@@ -619,6 +733,7 @@ struct ngx_http_request_s {
      */
     ngx_http_posted_request_t        *posted_requests;      //由子请求组成的单链表
 
+    //Index of current request phase.
     //全局的 ngx_http_phase_engine_t结构体中定义了一个 ngx_http_phase_handler_t回调方法组成的数组，
     //而 phase_handler成员则与该数组配合使用，表示请求下次应当执行以 phase_handler作为序号指定的数组中的回调方法。 
     //HTTP框架正是以这种方式把各个HTTP模块集成起来处理请求的, 叫phase_handler_index更合适
@@ -642,6 +757,18 @@ struct ngx_http_request_s {
     ngx_http_variable_value_t        *variables;
 
 #if (NGX_PCRE)
+    /**
+     * ncaptures, captures, captures_data — Regex captures produced by the last regex match of the request
+     * 
+     * A regex match can occur at a number of places during request processing: map lookup, server lookup by SNI or HTTP Host, rewrite, proxy_redirect, etc
+     * Captures produced by a lookup are stored in the above mentioned fields.
+     * 
+     * ncaptures holds the number of captures
+     * captures holds captures boundaries
+     * captures_data holds the string against which the regex was matched and which is used to extract captures
+     * 
+     * After each new regex match, request captures are reset to hold new values
+     */
     /**
      * Regex捕获了请求的最后一个正则匹配项产生的。在请求处理过程中，可以在许多地方进行正则匹配：MAP查找，SNI或HTTP主机的服务器查找，重写，Proxy_redirect等。
      * 
@@ -688,6 +815,11 @@ struct ngx_http_request_s {
     ngx_http_cleanup_t               *cleanup;
 
     /**
+     * Request reference counter. The field only makes sense for the main request
+     *  Increasing the counter is done by simple r->main->count++. To decrease the counter, call ngx_http_finalize_request(r, rc)
+     * Creating of a subrequest and running the request body read process both increment the counter.
+     */
+    /**
      * 表示当前请求的引用次数。
      * 例如，在使用 subrequest功能时，依附在这个请求上的子请求数目会返回到 count上，每增加一个子请求， 
      * count数就要加 1。其中任何一个子请求派生出新的子请求时，对应的原始请求（ main指针指向的请求）
@@ -695,8 +827,16 @@ struct ngx_http_request_s {
      * 这样在结束请求时就不会在count引用计数未清零时销毁请求
      */
     unsigned                          count:16;
+    /**
+     * Current subrequest nesting level. Each subrequest inherits its parent's nesting level, decreased by one
+     * An error is generated if the value reaches zero. The value for the main request is defined by the NGX_HTTP_MAX_SUBREQUESTS constant
+     */
     unsigned                          subrequests:8;    //记录主请求的子请求层级，最大值为50
     // 阻塞标志位，目前仅由 aio使用
+    /**
+     * Counter of blocks held on the request. While this value is non-zero, the request cannot be terminated. 
+     * Currently, this value is increased by pending AIO operations (POSIX AIO and thread operations) and active cache lock
+     */
     unsigned                          blocked:8;
 
     //标志位，为 1时表示当前请求正在使用异步文件 IO
@@ -725,6 +865,12 @@ struct ngx_http_request_s {
     unsigned                          valid_unparsed_uri:1;
     //标志位，为 1时表示 URL发生过 rewrite重写.如调用了ngx.redirect
     unsigned                          uri_changed:1;
+    /**
+     *  Number of URI changes remaining for the request.
+     * The total number of times a request can change its URI is limited by the NGX_HTTP_MAX_URI_CHANGES constant.
+     * With each change the value is decremented until it reaches zero, at which time an error is generated.
+     * Rewrites and internal redirects to normal or named locations are considered URI changes.
+     */
     //表示使用rewrite重写 URL的次数。因为目前最多可以更改10次，所以uri_changes初始化为11，
     //而每重写URL一次就把uri_changes减1，一旦uri_changes等于 0，则向用户返回失败
     unsigned                          uri_changes:4;    //记录uri变化的次数，最大值为11
@@ -821,12 +967,18 @@ struct ngx_http_request_s {
     //如果为1， 在ngx_http_header_filter_module向客户端发送响应头时，会增加响应头 "Transfer-Encoding: chunked" 
     unsigned                          chunked:1;
     /**
+     * Flag indicating that the output does not require a body. For example, this flag is used by HTTP HEAD requests.
+     * 
      * 若当前方法为 HEAD 则仅发送 header ，表示输出不需要http body
      * src/http/ngx_http_header_filter_module.c:187
      */
     unsigned                          header_only:1;
     //标志位，为 1时表示当前响应有tailer_header需要发送
     unsigned                          expect_trailers:1;
+    /**
+     * Flag indicating whether client connection keepalive is supported. 
+     * The value is inferred from the HTTP version and the value of the “Connection” header.
+     **/ 
     //标志位，为 1时表示当前请求是 keepalive请求。从HTTP版本和“Connection”标头的值推断的出来
     unsigned                          keepalive:1;
     //延迟关闭标志位，为 1时表示需要延迟关闭。例如，在接收完 HTTP头部时如果发现包体存在，
@@ -835,6 +987,11 @@ struct ngx_http_request_s {
     //标志位，为 1时表示正在丢弃 HTTP请求中的包体
     unsigned                          discard_body:1;
     unsigned                          reading_body:1;
+    /**
+     * Flag indicating that the current request is internal.
+     * To enter the internal state, a request must pass through an internal redirect or be a subrequest. 
+     * Internal requests are allowed to enter internal locations.
+     *  */  
     //标志位，为 1时表示请求的当前状态是在做内部跳转。(internal request) 或者子请求
     unsigned                          internal:1;
     unsigned                          error_page:1;
@@ -842,6 +999,7 @@ struct ngx_http_request_s {
     unsigned                          post_action:1;
     unsigned                          request_complete:1;
     unsigned                          request_output:1;
+    //Flag indicating that the output header has already been sent by the request.
     //标志位，为 1时表示发送给客户端的 HTTP响应头部已经发送。在调用ngx_http_send_header方法后，
     //若已经成功地启动响应头部发送流程，该标志位就会置为 1，用来防止反复地发送头部
     unsigned                          header_sent:1;
@@ -853,6 +1011,12 @@ struct ngx_http_request_s {
     unsigned                          logged:1;
     unsigned                          terminated:1;
 
+    /**
+     * Bitmask showing which modules have buffered the output produced by the request
+     * A number of filters can buffer output; for example, sub_filter can buffer data because of a partial string match, 
+     *  copy filter can buffer data because of the lack of free output buffers etc.
+     * As long as this value is non-zero, the request is not finalized pending the flush.
+     */
     //表示缓冲中是否有待发送内容的标志位
     /**
      * 通过位图方式显示了哪些模块已缓冲了请求产生的输出。许多过滤器可以缓冲输出；
@@ -869,9 +1033,22 @@ struct ngx_http_request_s {
      */
     unsigned                          buffered:4;
 
+    /**
+     * main_filter_need_in_memory, filter_need_in_memory — Flags requesting that the output produced in memory buffers rather than files.
+     * 
+     * This is a signal to the copy filter to read data from file buffers even if sendfile is enabled.
+     * The difference between the two flags is the location of the filter modules that set them. 
+     *  Filters called before the postpone filter in the filter chain set filter_need_in_memory, requesting that only the current request output come in memory buffers
+     *  Filters called later in the filter chain set main_filter_need_in_memory, requesting that both the main request and all subrequests read files in memory while sending output.
+     * 
+     */
     unsigned                          main_filter_need_in_memory:1;
     //如ngx_buf_t实际数据在文件中，则设置此标识会导致buf被重新复制一份到内存
     unsigned                          filter_need_in_memory:1;
+    /**
+     * Flag requesting that the request output be produced in temporary buffers, but not in readonly memory buffers or file buffers. 
+     * This is used by filters which may change output directly in the buffers where it's sent.
+     */
     //如ngx_buf_t实际数据不可写，则设置此标识会导致buf被重新复制一份并标记可写
     unsigned                          filter_need_temporary:1;
     /**
@@ -889,8 +1066,13 @@ struct ngx_http_request_s {
     unsigned                          preserve_body:1;
     // Flag indicating that a partial response can be sent to the client, as requested by the HTTP Range header
     unsigned                          allow_ranges:1;
+    // Flag indicating that a partial response can be sent while a subrequest is being processed.
     //标志表明在处理子要求时可以发送部分响应。参考ngx_http_range_header_filter()
     unsigned                          subrequest_ranges:1;
+    /**
+     * Flag indicating that only a single continuous range of output data can be sent to the client. 
+     * This flag is usually set when sending a stream of data, for example from a proxied server, and the entire response is not available in one buffer.
+     */
     // 标志表明只能将单个连续的输出数据范围发送到客户端。通常在发送数据流时设置此标志，例如从代理服务器发送，整个响应在不在一个缓冲区中.参考 range_filter模块 
     unsigned                          single_range:1;
     //by_pass ngx_http_not_modified_header_filter
@@ -934,6 +1116,7 @@ struct ngx_http_request_s {
     u_char                           *host_start;
     u_char                           *host_end;
 
+    //http_major, http_minor  — Client HTTP protocol version in numeric form split into major and minor parts.
     unsigned                          http_minor:16;
     unsigned                          http_major:16;
 };

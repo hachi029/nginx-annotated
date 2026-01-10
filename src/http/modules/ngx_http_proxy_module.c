@@ -1030,7 +1030,7 @@ static ngx_conf_bitmask_t  ngx_http_proxy_cookie_flags_masks[] = {
 
 
 /**
- *  ngx_http_proxy_module模块的 content_handler
+ *  ngx_http_proxy_module 模块的 content_handler
  *  实现了反向代理的功能
  */
 static ngx_int_t
@@ -1360,6 +1360,7 @@ ngx_http_proxy_create_key(ngx_http_request_t *r)
 
 /**
  * proxy模块实现的upstream机制的create_request
+ * 创建发往upstream的 ngx_http_request_t
  */
 static ngx_int_t
 ngx_http_proxy_create_request(ngx_http_request_t *r)
@@ -1464,7 +1465,7 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
     ngx_http_script_flush_no_cacheable_variables(r, plcf->body_flushes);
     ngx_http_script_flush_no_cacheable_variables(r, headers->flushes);
 
-    //计算body_len
+    //处理proxy_set_body配置指令, 计算body_len
     if (plcf->body_lengths) {
         //配置了proxy_set_body指令
         le.ip = plcf->body_lengths->elts;
@@ -1516,7 +1517,7 @@ ngx_http_proxy_create_request(ngx_http_request_t *r)
     }
 
 
-    //如果向上游转发客户端请求体
+    //如果向上游转发客户端请求头
     if (plcf->upstream.pass_request_headers) {
         part = &r->headers_in.headers.part;
         header = part->elts;
@@ -2320,6 +2321,9 @@ ngx_http_proxy_input_filter_init(void *data)
 }
 
 
+/**
+ * u->pipe->input_filter = ngx_http_proxy_copy_filter;
+ */
 static ngx_int_t
 ngx_http_proxy_copy_filter(ngx_event_pipe_t *p, ngx_buf_t *buf)
 {

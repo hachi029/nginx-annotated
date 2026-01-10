@@ -104,6 +104,12 @@ struct ngx_command_s {
     ngx_uint_t            offset;
     // 配置项读取后的处理方法，必须是 ngx_conf_post_t结构的指针
     //支持的回调方法；大多数情况为NULL
+    /**
+     * has two purposes: 
+     *   1. be used to define a handler to be called after the main handler has completed
+     *   2. to pass additional data to the main handler. In the first case, the ngx_conf_post_t structure needs to be initialized with a pointer to the handler
+     */
+    //
     void                 *post;
 };
 

@@ -62,6 +62,18 @@ typedef void (*ngx_log_writer_pt) (ngx_log_t *log, ngx_uint_t level,
     u_char *buf, size_t len);
 
 
+/**
+ * https://nginx.org/en/docs/dev/development_guide.html#logging
+ * 支持以下类型的输出：
+ * stderr — Logging to standard error (stderr)
+ * file — Logging to a file
+ * syslog — Logging to syslog
+ * memory — Logging to internal memory storage for development purposes; the memory can be accessed later with a debugger
+ * 
+ * A logger instance can be a chain of loggers, linked to each other with the next field. In this case, each message is written to all loggers in the chain.
+ * 
+ * 
+ */
 // 错误日志结构体
 // 多个日志对象串成一个按level降序的链表
 // 即日志级别由低到高，提高记录日志的效率

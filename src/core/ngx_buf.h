@@ -18,6 +18,9 @@ typedef void *            ngx_buf_tag_t;
 typedef struct ngx_buf_s  ngx_buf_t;
 
 /**
+ * https://nginx.org/en/docs/dev/development_guide.html#buffer
+ * 
+ * it's used to hold data to be written to a destination or read from a source
  * 处理大数据的关键数据结构，它既应用于内存数据也应用于磁盘数据
  * 包含以下各个域:
  *  start, end — 为缓冲区分配内存块的边界。
@@ -43,12 +46,17 @@ struct ngx_buf_s {
     u_char          *start;         /* start of buffer */
      //如果ngx_buf_t缓冲区用于内存，那么end指向这段内存的结束地址
     u_char          *end;           /* end of buffer */
+    //Unique value used to distinguish buffers; created by different nginx modules, usually for the purpose of buffer reuse.
     //表示当前缓冲区的类型，例如由哪个模块使用就指向这个模块 ngx_module_t变量的地址
     ngx_buf_tag_t    tag;
     // 引用的文件
     ngx_file_t      *file;
-    /* 当前缓冲区的一个影子缓冲区，即当一个缓冲区复制另一个缓冲区的数据，
-     * 就会发生相互指向对方的shadow指针
+    /**
+     * shadow — Reference to another ("shadow") buffer related to the current buffer, 
+     * usually in the sense that the buffer uses data from the shadow. 
+     * When the buffer is consumed, the shadow buffer is normally also marked as consumed.
+     */
+    /* 当前缓冲区的一个影子缓冲区，即当一个缓冲区引自于另一个缓冲区的数据，就会发生相互指向对方的shadow指针
      * 将现在的buffer关联到另外一个（“shadow”）buffer，通常数据使用“shadow”buffer 中的数据， 当buffer使用完毕，后“shadow”buffer 也一并释放。
      */
     ngx_buf_t       *shadow;
@@ -69,14 +77,17 @@ struct ngx_buf_s {
     /* the buf's content is mmap()ed and must not be changed */
     unsigned         mmap:1;
 
+    //Flag indicating that the buffer can be reused and needs to be consumed as soon as possible
     // 标志位，为 1时表示可回收， 标识可以重复使用缓冲区，并且需要尽快消耗。
     unsigned         recycled:1;
 
     // 标志位，为1时表示这段缓冲区处理的是文件而不是内存
     unsigned         in_file:1;
-    //标识缓冲区所有数据需要进行输出。
+    //标识缓冲区所有数据需要进行输出。 Flag indicating that all data prior to the buffer need to be flushed
     unsigned         flush:1;   // 标志位，为 1时表示需要执行 flush操作
 
+    //Flag indicating that the buffer carries no data or special signal like flush or last_buf. 
+    //By default nginx considers such buffers an error condition, but this flag tells nginx to skip the error check.
     /**
      * 标志位，对于操作这块缓冲区时是否使用同步方式，需谨慎考虑，这可能会阻塞Nginx进程，
      * Nginx中所有操作几乎都是异步的，这是它支持高并发的关键。
@@ -85,10 +96,12 @@ struct ngx_buf_s {
     unsigned         sync:1;
 
     /**
+     * Flag indicating that the buffer is the last in output.
      * 标志位，表示是否是最后一块缓冲区，因为 ngx_buf_t可以由ngx_chain_t链表串联起来，
      * 因此，当 last_buf为 1时，表示当前是最后一块待处理的缓冲区
      */
     unsigned         last_buf:1;    
+    //Flag indicating that there are no more data buffers in a request or subrequest.
     //标志位，表示是否是 ngx_chain_t中的最后一块缓冲区。
     //标识表明请求request或子请求subrequest中没有更多的数据缓冲区
     unsigned         last_in_chain:1;

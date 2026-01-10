@@ -96,14 +96,35 @@ typedef struct {
 #define NGX_HTTP_LOC_CONF_OFFSET   offsetof(ngx_http_conf_ctx_t, loc_conf)
 
 
-//利用结构体变量ngx_http_request_t r获取HTTP模块main、srv、loc级别的配置项结构体
+/**
+ * 
+ * The following macros are available for accessing configuration for HTTP modules at runtime.
+ * 
+ */
+//利用结构体变量ngx_http_request_t r获取HTTP模块main、srv、loc级别的配置项结构体 (在runtime阶段使用)
 #define ngx_http_get_module_main_conf(r, module)                             \
     (r)->main_conf[module.ctx_index]
 #define ngx_http_get_module_srv_conf(r, module)  (r)->srv_conf[module.ctx_index]
 #define ngx_http_get_module_loc_conf(r, module)  (r)->loc_conf[module.ctx_index]
 
 
-//利用结构体变量ngx_conf_t cf获取HTTP模块的main、srv、loc级别的配置项结构体
+/**
+ * Each HTTP module can have three types of configuration:
+ *   Main configuration — Applies to the entire http block. Functions as global settings for a module.
+ *   Server configuration — Applies to a single server block. Functions as server-specific settings for a module.
+ *   Location configuration — Applies to a single location, "if" or "limit_except" block. Functions as location-specific settings for a module.
+ * 
+ * Configuration structures are created at the nginx configuration stage by calling functions, 
+ * which allocate the structures, initialize them and merge them.
+ * 
+ * The main configuration of a request never changes. 
+ * Server configuration can change from the default after the virtual server for the request is chosen. 
+ * Location configuration selected for processing a request can change multiple times as a result of a rewrite operation or internal redirect
+ * 
+ * The following macros are available. for accessing configuration for HTTP modules at configuration time. 
+ * They all take ngx_conf_t reference as the first argument.
+ */
+//利用结构体变量ngx_conf_t cf获取HTTP模块的main、srv、loc级别的配置项结构体 (在configuration阶段使用)
 #define ngx_http_conf_get_module_main_conf(cf, module)                        \
     ((ngx_http_conf_ctx_t *) cf->ctx)->main_conf[module.ctx_index]
 #define ngx_http_conf_get_module_srv_conf(cf, module)                         \

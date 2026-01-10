@@ -428,8 +428,7 @@ ngx_http_read_client_request_body_handler(ngx_http_request_t *r)
 
 
 /**
- * 开启读取客户端请求体后，ngx_http_read_client_request_body_handler
- * 和ngx_http_read_client_request_body都会调用本方法
+ * 开启读取客户端请求体后, ngx_http_read_client_request_body_handler 和 ngx_http_read_client_request_body 都会调用本方法
  * 
  * 该方法把客户端与Nginx之间TCP连接上套接字缓冲区中的当前字符流全部读出来，
  * 并判断是否需要写入文 件，以及是否接收到全部的包体，同时在接收到完整的包体后激活post_handler回调方法
@@ -726,8 +725,7 @@ ngx_http_copy_pipelined_header(ngx_http_request_t *r, ngx_buf_t *buf)
 
 
 /**
- * 读取请求时，如果配置了proxy_request_buffering on, 且读取缓冲区满了，
- *  会将读取到的缓冲区写入临时文件
+ * 读取请求时，如果配置了proxy_request_buffering on, 且读取缓冲区满了，会将读取到的缓冲区写入临时文件
  * 将请求体写入临时文件
  * 1.如果请求体已经写入临时文件，则直接返回
  * 2.如果请求体没有写入临时文件，则创建临时文件，并将请求体写入临时文件
@@ -1276,7 +1274,8 @@ ngx_http_test_expect(ngx_http_request_t *r)
 
 
 /**
- * 根据是否是chunked请求，执行不同逻辑 , in是读取到的HTTP包体
+ * 每读取到一部分请求体，就会调用此方法
+ * 根据是否是chunked请求，执行不同逻辑 , in是已经读取到的HTTP包体
  * 返回值不为NGX_OK表示有错误
  */
 static ngx_int_t
@@ -1380,6 +1379,7 @@ ngx_http_request_body_length_filter(ngx_http_request_t *r, ngx_chain_t *in)
     // 实际上是 ngx_http_request_body_save_filter
     rc = ngx_http_top_request_body_filter(r, out);
 
+    //回收缓冲区（Buffer）链表
     ngx_chain_update_chains(r->pool, &rb->free, &rb->busy, &out,
                             (ngx_buf_tag_t) &ngx_http_read_client_request_body);
 
@@ -1668,7 +1668,7 @@ ngx_http_request_body_save_filter(ngx_http_request_t *r, ngx_chain_t *in)
     ////////此时可以将请求体缓冲到文件中
     if (rb->rest > 0) {     //如果请求体还没有读取完,
 
-        //缓存已经满了
+        //缓存已经满了 (rb->buf->last == rb->buf->end), 则调用ngx_http_write_request_body 将请求头保存到临时文件中
         if (rb->bufs && rb->buf && rb->buf->last == rb->buf->end
             && ngx_http_write_request_body(r) != NGX_OK)
         {

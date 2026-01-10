@@ -225,6 +225,20 @@
 
 
 /**
+ * https://nginx.org/en/docs/dev/development_guide.html#core_modules
+ * Modules are the building blocks of nginx, and most of its functionality is implemented as modules. 
+ * The module source file must contain a global variable of type ngx_module_t.
+ * 
+ * The module lifecycle consists of the following events:
+ * 1.Configuration directive handlers are called as they appear in configuration files in the context of the master process.
+ * 2.After the configuration is parsed successfully, init_module handler is called in the context of the master process. 
+ *   The init_module handler is called in the master process each time a configuration is loaded.
+ * 3.The master process creates one or more worker processes and the init_process handler is called in each of them.
+ * 4.When a worker process receives the shutdown or terminate command from the master, it invokes the exit_process handler.
+ * 5.The master process calls the exit_master handler before exiting.
+
+ */
+/**
  * 作为所有模块的通用接口
  */
 struct ngx_module_s {
@@ -259,12 +273,16 @@ struct ngx_module_s {
      *   } ngx_core_module_t;
      */
 
-    //每种模块都有具体的ctx， 如ngx_http_module_t、ngx_event_module_t
+    //每种模块都有具体的ctx， 如ngx_http_module_t、ngx_event_module_t。对于NGX_CORE_MODULE 为 ngx_core_module_t
     void                 *ctx;
      //模块定义的指令，指向第一个指令地址，最后一个置null标识数组结束
     ngx_command_t        *commands;
 
     /**
+     * The module type defines exactly what is stored in the ctx field. 
+     * The NGX_CORE_MODULE is the most basic and thus the most generic and most low-level type of module. 
+     * The other module types are implemented on top of it and provide a more convenient way to deal with corresponding domains, like handling events or HTTP requests.
+     * 
      * type表示该模块的类型，它与 ctx指针是紧密相关的。在官方 Nginx中，它的取值范围是以下 6种
      * NGX_HTTP_MODULE、NGX_CORE_MODULE、NGX_CONF_MODULE、NGX_EVENT_MODULE、NGX_STREAM_MODULE、NGX_MAIL_MODULE
      */
@@ -320,7 +338,9 @@ struct ngx_module_s {
 
 
 /**
- * 核心模块的接口.ngx_module_s->ctx 核心模块的上下文，主要定义了创建配置和初始化配置的结构
+ * 核心模块NGX_CORE_MODULE类型的接口(ngx_module_s->ctx). ngx_module_s->ctx 核心模块的上下文，主要定义了创建配置和初始化配置的结构
+ * 
+ * For core modules, nginx calls create_conf before parsing a new configuration and init_conf after all configuration is parsed successfully.
  */
 typedef struct {
     // 核心模块名称
