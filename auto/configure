@@ -3,7 +3,7 @@
 # Copyright (C) Igor Sysoev
 # Copyright (C) Nginx, Inc.
 
-
+## configure脚本主要生成nginx_modules.c和Makefile文件
 LC_ALL=C
 export LC_ALL
 

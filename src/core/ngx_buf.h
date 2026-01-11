@@ -178,7 +178,7 @@ struct ngx_output_chain_ctx_s {
     /* 这个用来标记当前那个模块使用这个chain */
     ngx_buf_tag_t                tag;       //ngx_buf_tag_t 为 void*, 一般为模块的地址
 
-    //是一个回调函数，一般是ngx_http_next_filter, 也就是继续调用filter链
+    //是一个回调函数，一般是 ngx_http_next_filter, 也就是继续调用filter链
     ngx_output_chain_filter_pt   output_filter;
     //对于ngx_http_copy_filter为当前请求r
     void                        *filter_ctx;    /* 当前filter的上下文，这里是由于upstream也会调用output_chain */

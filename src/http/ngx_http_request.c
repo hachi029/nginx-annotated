@@ -2843,7 +2843,7 @@ ngx_http_set_virtual_server(ngx_http_request_t *r, ngx_str_t *host)
 /**
  * ngx_http_set_virtual_server->.
  * 
- * 读取完请求头后，根据Host查找虚拟主机。查找的结果为表示server{}块的配置结构体ngx_http_core_srv_conf_t
+ * 读取完请求头后，根据Host查找虚拟主机。查找的结果为表示server{}块的配置结构体 ngx_http_core_srv_conf_t
  * 
  * 先根据通配符hash查找，再根据正则匹配查找：
  *  1.匹配域名时，首先在字符串域名构成的哈希表上做精确查询，如果查询到了，就直接返回，因此，完全匹配的字符串域名优先级是最高的；
@@ -3135,6 +3135,8 @@ ngx_http_finalize_request(ngx_http_request_t *r, ngx_int_t rc)
 
     //NGX_DONE参数表示不需要做任何事
     if (rc == NGX_DONE) {
+        //当某一种动作（如接收HTTP请求包体）正常结束而请求还有业务要继续处理时，多半都是传递NGX_DONE参数。
+        //这个ngx_http_finalize_connection方法还会去检查引用计数情况，并不一定会销毁请求
         ngx_http_finalize_connection(r);
         return;
     }
@@ -3145,6 +3147,7 @@ ngx_http_finalize_request(ngx_http_request_t *r, ngx_int_t rc)
 
     //NGX_DECLINED表示请求还需要按照11个HTTP阶段继续处理下去，
     if (rc == NGX_DECLINED) {
+        //将其设置为NULL是为了让ngx_http_core_content_phase方法可以继续调用NGX_HTTP_CONTENT_PHASE阶段的其他处理方法
         r->content_handler = NULL; 
         r->write_event_handler = ngx_http_core_run_phases;
         ngx_http_core_run_phases(r);
@@ -3186,6 +3189,8 @@ ngx_http_finalize_request(ngx_http_request_t *r, ngx_int_t rc)
             return;
         }
 
+        //检查当前请求的main是否指向自己，如果是，这个请求就是来自客户端的原始请求（非子请求），
+        //这时检查读/写事件的timer_set标志位，如果timer_set为1，则表明事件在定时器中，需要调用ngx_del_timer方法把读/写事件从定时器中移除。
         if (r == r->main) { //如果是主请求
             if (c->read->timer_set) {
                 ngx_del_timer(c->read);
@@ -3196,10 +3201,12 @@ ngx_http_finalize_request(ngx_http_request_t *r, ngx_int_t rc)
             }
         }
 
+        //设置读/写事件的回调方法为ngx_http_request_handler方法，它会继续处理HTTP请求。
         c->read->handler = ngx_http_request_handler;
         c->write->handler = ngx_http_request_handler;
 
         //根据rc参数构造完整的 HTTP响应
+        //调用ngx_http_special_response_handler方法，该方法负责根据rc参数构造完整的HTTP响应。
         ngx_http_finalize_request(r, ngx_http_special_response_handler(r, rc));
         return;
     }
@@ -3557,6 +3564,8 @@ ngx_http_set_write_handler(ngx_http_request_t *r)
  * 可写事件回调， 请求的连接上可写事件被触发，此方法被调用
  * 无论是ngx_http_send_header还是ngx_http_output_filter方法，它们在调用时一般都无 法发送全部的响应，
  * 剩下的响应内容都得靠ngx_http_writer方法来发送
+ * 
+ * 如果这个请求的连接上可写事件被触发，也就是TCP的滑动窗口在告诉Nginx进程可以发送响应了，这时ngx_http_writer方法就开始工作了
  * 
  * 1.检查写事件的 timedout 标志位，若该标志位为 1（表示超时），进而判断属于哪种情况引起的超时（第一种：网络异常或客户端长时间不接收响应；第二种：由于响应发送速度超速，导致写事件被添加到定时器机制（注意一点：delayed 标志位此时是为1），有超速引起的超时，不算真正的响应发送超时）；
  * 2.检查 delayed 标志位，若 delayed 为 0，表示由第一种情况引起的超时，即是真正的响应超时，此时设置timedout 标志位为1，并调用函数ngx_http_finalize_request 结束请求；

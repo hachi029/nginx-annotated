@@ -393,7 +393,7 @@ ngx_process_events_and_timers(ngx_cycle_t *cycle)
     ngx_log_debug1(NGX_LOG_DEBUG_EVENT, cycle->log, 0,
                    "timer delta: %M", delta);
 
-    //执行ngx_posted_accept_events 队列中需要建立新连接的accept事件
+    //执行 ngx_posted_accept_events 队列中需要建立新连接的accept事件
     ngx_event_process_posted(cycle, &ngx_posted_accept_events);
 
     //如果获取到了accept_mutex锁，且处理完了accept_events后，释放accept_mutex锁
@@ -404,7 +404,7 @@ ngx_process_events_and_timers(ngx_cycle_t *cycle)
     //处理所有可能过期的定时器事件
     ngx_event_expire_timers();
 
-    //执行 ngx_posted_events 队列中的普通读/写事件
+    //在执行完定时器事件后才, 执行 ngx_posted_events 队列中的普通读/写事件
     ngx_event_process_posted(cycle, &ngx_posted_events);
 }
 

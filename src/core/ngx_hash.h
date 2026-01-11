@@ -222,6 +222,7 @@ typedef struct ngx_table_elt_s  ngx_table_elt_t;
  * 专为存放http请求/响应头部的结构体. 表示一个请求/响应头， 使用next字段组成单向链表
  * 
  * 键值对结构, 主要用来表示HTTP头部信息
+ * 可以是kv对，hash字段表明也可以是hash表中的一个成员
  */
 struct ngx_table_elt_s {
     ngx_uint_t        hash;     //hash, 0表示删除， 可以在ngx_hash_t中更快地找到相同key的 ngx_table_elt_t数据

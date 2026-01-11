@@ -75,7 +75,7 @@ ngx_output_chain(ngx_output_chain_ctx_t *ctx, ngx_chain_t *in)
          */
 
         if (in == NULL) {
-            //为ngx_http_next_body_filter 参考 ngx_http_copy_filter
+            //为 ngx_http_next_body_filter 参考 ngx_http_copy_filter
             return ctx->output_filter(ctx->filter_ctx, in);
         }
 

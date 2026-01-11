@@ -1110,6 +1110,10 @@ free:
 
 /* the copy input filter */
 
+/**
+ * 一般使用 upstream机制默认提供的 ngx_event_pipe_copy_input_filter 方法作为 input_filter 
+ *  会将接收到的缓冲区设置到 in链表中
+ */
 ngx_int_t
 ngx_event_pipe_copy_input_filter(ngx_event_pipe_t *p, ngx_buf_t *buf)
 {

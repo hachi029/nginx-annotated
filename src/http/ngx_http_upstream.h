@@ -214,6 +214,7 @@ typedef struct {
 
 
 /**
+ *  与upstream交互时的限制性参数
  *  HTTP 反向代理模块在配置文件 nginx.conf 提供的配置项大都是用来设置结构体 ngx_http_upstream_conf_t 的成员。
  *  3 个超时时间成员是必须要设置的，因为他们默认是 0，即若不设置这 3 个成员，则无法与上游服务器建立TCP 连接。
  * 每一个请求都有独立的ngx_http_upstream_conf_t 结构体，因此，每个请求都可以拥有不同的网络超时时间等配置

@@ -283,7 +283,7 @@ static char **ngx_os_environ;
     20.多进程工作模式，即 master-worker 多进程工作模式；
  */
 int ngx_cdecl
-main1(int argc, char *const *argv)
+main(int argc, char *const *argv)
 {
     ngx_buf_t        *b;
     ngx_log_t        *log;

@@ -160,6 +160,11 @@ ngx_http_header_out_t  ngx_http_headers_out[] = {
 
 
 /**
+ * 当此方法无法一次性发生HTTP头部时：
+ *  1. 请求的out成员中将会保存剩余的响应头部；
+ *  2. 此方法返回NGX_AGAIN
+ */
+/**
  * 作为header_filter 的最后一个filter
  * 
  * 核心方法，整体逻辑为先计算响应行、响应头的长度，再构建响应行、响应头的内容，最后调用ngx_http_write_filter输出

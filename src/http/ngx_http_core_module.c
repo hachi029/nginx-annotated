@@ -881,6 +881,8 @@ ngx_http_handler(ngx_http_request_t *r)
 
         //从头开始重新执行
          /*
+         *  NGX_HTTP_POST_READ_PHASE
+         * 
          * phase_handler序号设置为0，表示执行ngx_http_phase_engine_t结构体成员
          * ngx_http_phase_handler_t *handlers数组中的第一个回调方法；
          */

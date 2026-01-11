@@ -1208,9 +1208,9 @@ ngx_epoll_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
 
 /**
  * 异步io事件触发后的handler
- * epoll_wait在返回ngx_eventfd_event事件后就会调用它的回调方法ngx_epoll_eventfd_handler处理已经完成的异步I/O事件
+ * epoll_wait在返回 ngx_eventfd_event 事件后就会调用它的回调方法ngx_epoll_eventfd_handler处理已经完成的异步I/O事件
  * 
- * 通过ngx_eventfd通知描述符和 ngx_epoll_eventfd_handler回调方法，将文件异步I/O事件结合起来的
+ * 通过ngx_eventfd通知描述符和 ngx_epoll_eventfd_handler 回调方法，将文件异步I/O事件结合起来的
  */
 static void
 ngx_epoll_eventfd_handler(ngx_event_t *ev)
@@ -1256,7 +1256,7 @@ ngx_epoll_eventfd_handler(ngx_event_t *ev)
     // ready表示还未处理的事件。当 ready大于0时继续处理
     while (ready) {
 
-        // 调用io_getevents获取已经完成的异步I/O事件
+        // 调用io_getevents获取已经完成的异步I/O事件, 类似epoll_wait
         events = io_getevents(ngx_aio_ctx, 1, 64, event, &ts);
 
         ngx_log_debug1(NGX_LOG_DEBUG_EVENT, ev->log, 0,
@@ -1285,7 +1285,7 @@ ngx_epoll_eventfd_handler(ngx_event_t *ev)
                 aio = e->data;
                 aio->res = event[i].res;
 
-                // 将该事件放到 ngx_posted_events队列中延后执行
+                // 将该事件放到 ngx_posted_events 队列中延后执行
                 ngx_post_event(e, &ngx_posted_events);
             }
 

@@ -106,6 +106,7 @@ ngx_http_write_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
     /* find the size, the flush point and the last link of the saved chain */
 
+    //in 是本次要发送的；out是上次还没发送完的(因为tcp写缓冲区空间有限， 上次可能仅仅发送了部分，剩余的保存在r->out中)
     //遍历r->out, 直到最后一个节点。计算out缓冲区数据大小, 统计flush/sync/last标识。out chain，也就是上次没有发送完成的chain buf
     /*
      * 遍历当前请求out链表缓冲区，计算剩余响应报文的长度；
@@ -296,6 +297,7 @@ ngx_http_write_filter(ngx_http_request_t *r, ngx_chain_t *in)
      //https://nginx.org/en/docs/http/ngx_http_core_module.html#postpone_output 默认1460
      //the size of all bufs is smaller than "postpone_output" directive
     if (!last && !flush && in && size < (off_t) clcf->postpone_output) {
+        //没有攒够数据，先不发送
         return NGX_OK;
     }
 
@@ -372,6 +374,7 @@ ngx_http_write_filter(ngx_http_request_t *r, ngx_chain_t *in)
         if (limit <= 0) {   //如果超过限速
             //设置delayed标记
             c->write->delayed = 1;
+            //计算发送超出部分(limit)还需要等待的时间
             delay = (ngx_msec_t) (- limit * 1000 / r->limit_rate + 1);
             //设置定时器
             ngx_add_timer(c->write, delay);
@@ -382,6 +385,7 @@ ngx_http_write_filter(ngx_http_request_t *r, ngx_chain_t *in)
             return NGX_AGAIN;
         }
 
+        //如果配置了sendfile_max_chunk, limit不能超过此值
         if (clcf->sendfile_max_chunk
             && (off_t) clcf->sendfile_max_chunk < limit)
         {

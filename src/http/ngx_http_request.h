@@ -378,10 +378,10 @@ typedef struct {
     ngx_temp_file_t                  *temp_file;    //不为NULL表示保存到了临时文件里
     //keeps the result as a buffer chain
     //指向保存请求体的链表头；
-    //当包体需要全部存放在内存中时，如果一块 ngx_buf_t缓冲区无法存放完，这时就需要使用 ngx_chain_t链表来存放
+    //当包体需要全部存放在内存中时，如果一块 ngx_buf_t 缓冲区(即下边的buf字段)无法存放完，这时就需要使用 ngx_chain_t链表来存放
     //该链表最多可能有2个节点，每个节点为一个buffer，但是这个buffer的内容可能是保存在内存中，也可能是保存在磁盘文件中
     ngx_chain_t                      *bufs;
-    //指向当前用于保存请求体的内存缓存；
+    //指向当前用于保存请求体的内存缓存；大小为client_body_buffer_size,如果超出此值，则需要通过上边的bufs来存放
     ngx_buf_t                        *buf;      //直接接收 HTTP包体的缓存
     //根据 content-length头部和已接收到的包体长度，计算出的还需要接收的包体长度
     off_t                             rest;     //剩余的待读取的请求体长度, 初始化为content-length
@@ -811,7 +811,7 @@ struct ngx_http_request_s {
     ngx_http_log_handler_pt           log_handler;
 
     //在这个请求中如果打开了某些资源，并需要在请求结束时释放，那么都需要在把定义的释放资源方法添加到 cleanup成员中
-    //清理函数链表，包括一个handler和一个data指针, 
+    //清理函数链表，包括一个handler和一个data指针. 当ngx_http_request_t 结构体被释放时调用
     ngx_http_cleanup_t               *cleanup;
 
     /**
