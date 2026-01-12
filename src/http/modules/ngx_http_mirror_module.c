@@ -122,6 +122,7 @@ ngx_http_mirror_handler(ngx_http_request_t *r)
             return ctx->status;
         }
 
+        //创建模块上下文结构体
         ctx = ngx_pcalloc(r->pool, sizeof(ngx_http_mirror_ctx_t));
         if (ctx == NULL) {
             return NGX_ERROR;
@@ -178,6 +179,7 @@ ngx_http_mirror_handler_internal(ngx_http_request_t *r)
 
     mlcf = ngx_http_get_module_loc_conf(r, ngx_http_mirror_module);
 
+    //mirror为多个url数组，表示向多个url镜像
     name = mlcf->mirror->elts;
 
     //以子请求的方式，向每个mirror指令配置的uri发起请求

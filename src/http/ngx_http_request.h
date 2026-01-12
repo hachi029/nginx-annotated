@@ -723,13 +723,7 @@ struct ngx_http_request_s {
             ngx_http_request_t               *request;  //当前子请求
             ngx_http_posted_request_t        *next;     //下一个节点
         };
-     */
-    /**
-     * 请求通常由ngx_http_post_request(r, NULL)调用发布。它始终发布到主要请求posted_requests列表。
-     * 
-     * 函数ngx_http_run_posted_requests(c)运行了在传递连接的当前需要执行的请求， 主请求中发布的所有子请求。
-     * 
-     * 所有事件处理程序都会调用ngx_http_run_posted_requests，这可能触发发送所有请求。通常，在调用请求的读写处理程序后被调用
+        这个链表用以保存需要延迟处理的请求（不局限于子请求）。因此子请求会在父请求本地调度完毕后得到运行的机会，这通常是子请求获得首次运行机会的手段
      */
     ngx_http_posted_request_t        *posted_requests;      //由子请求组成的单链表
 

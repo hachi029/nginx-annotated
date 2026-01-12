@@ -74,9 +74,12 @@ static ngx_command_t  ngx_http_auth_request_commands[] = {
 };
 
 
+/**
+ * https://nginx.org/en/docs/http/ngx_http_auth_request_module.html
+ */
 static ngx_http_module_t  ngx_http_auth_request_module_ctx = {
     NULL,                                  /* preconfiguration */
-    //  注册 ACCESS_PHASE阶段的handler
+    //  注册 ACCESS_PHASE 阶段的handler
     ngx_http_auth_request_init,            /* postconfiguration */
 
     NULL,                                  /* create main configuration */
@@ -117,7 +120,7 @@ ngx_module_t  ngx_http_auth_request_module = {
 
 
 /**
- * Access 阶段的 handler
+ * access 阶段的 handler
  */
 static ngx_int_t
 ngx_http_auth_request_handler(ngx_http_request_t *r)
@@ -141,6 +144,7 @@ ngx_http_auth_request_handler(ngx_http_request_t *r)
     ctx = ngx_http_get_module_ctx(r, ngx_http_auth_request_module);
 
     if (ctx != NULL) {
+        //非首次进入此方法
         if (!ctx->done) {       //子请求未结束
             return NGX_AGAIN;
         }
