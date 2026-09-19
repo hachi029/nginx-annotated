@@ -92,6 +92,15 @@ static ngx_http_module_t  ngx_http_range_header_filter_module_ctx = {
 };
 
 
+/**
+ * 是用来处理HTTP请求头部range部分的，它会解析客户端请求中的range头部，
+ * 该模块会按照range协议修改指向文件的 ngx_buf_t缓冲区中的file_pos和file_last成员，
+ * 以此实现仅发送一个文件的部分内容到客户端
+ * 
+ * 	默认打开，只是响应体过滤函数，支持range功能，如果请求包含range请求，那就只发送range请求的一段内容。
+ * 
+ *  处理请求头中的Range信息，根据Range中的要求返回文件的一部分给用户
+ */
 ngx_module_t  ngx_http_range_header_filter_module = {
     NGX_MODULE_V1,
     &ngx_http_range_header_filter_module_ctx, /* module context */
@@ -143,6 +152,9 @@ static ngx_http_output_header_filter_pt  ngx_http_next_header_filter;
 static ngx_http_output_body_filter_pt    ngx_http_next_body_filter;
 
 
+/**
+ * 本模块的header_filter
+ */
 static ngx_int_t
 ngx_http_range_header_filter(ngx_http_request_t *r)
 {
@@ -651,6 +663,9 @@ ngx_http_range_not_satisfiable(ngx_http_request_t *r)
 }
 
 
+/**
+ *  ngx_http_range_body_filter 模块注册的一个body_filter
+ */
 static ngx_int_t
 ngx_http_range_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
@@ -979,6 +994,10 @@ ngx_http_range_multipart_body(ngx_http_request_t *r,
 }
 
 
+/**
+ * postconfiguration 
+ * ngx_http_range_header_filter模块注册 一个header_filter 
+ */
 static ngx_int_t
 ngx_http_range_header_filter_init(ngx_conf_t *cf)
 {
@@ -989,6 +1008,10 @@ ngx_http_range_header_filter_init(ngx_conf_t *cf)
 }
 
 
+/**
+ * postconfiguration
+ * ngx_http_range_body_filter 模块注册的一个body_filter
+ */
 static ngx_int_t
 ngx_http_range_body_filter_init(ngx_conf_t *cf)
 {

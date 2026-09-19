@@ -10,16 +10,35 @@
 #include <ngx_http.h>
 
 
+/**
+ * https://nginx.org/en/docs/http/ngx_http_index_module.html
+ * 
+ * processes requests ending with the slash character (‘/’)
+ * 
+ *  配置格式：
+ * 
+ *  location / {
+ *      index index.$geo.html index.html;
+ *  }
+ * 
+ */
+ /**
+  * 代表index配置指令中的一个配置值
+  */
 typedef struct {
-    ngx_str_t                name;
-    ngx_array_t             *lengths;
-    ngx_array_t             *values;
+    ngx_str_t                name;      //index的配置值 index.html
+    ngx_array_t             *lengths;   //复杂变量
+    ngx_array_t             *values;    //复杂变量
 } ngx_http_index_t;
 
 
+/**
+ * 模块配置结构体
+ */
 typedef struct {
+    //元素类型为 ngx_http_index_t， 代表index配置指令中的一个配置值
     ngx_array_t             *indices;    /* array of ngx_http_index_t */
-    size_t                   max_index_len;
+    size_t                   max_index_len; //记录所有index配置指令中配置值的最大长度
 } ngx_http_index_loc_conf_t;
 
 
@@ -54,6 +73,7 @@ static ngx_command_t  ngx_http_index_commands[] = {
 
 static ngx_http_module_t  ngx_http_index_module_ctx = {
     NULL,                                  /* preconfiguration */
+    //安装content_handler
     ngx_http_index_init,                   /* postconfiguration */
 
     NULL,                                  /* create main configuration */
@@ -93,6 +113,9 @@ ngx_module_t  ngx_http_index_module = {
  * it only indicates that path points to a regular file, not a directory.
  */
 
+/**
+ * content_handler
+ */
 static ngx_int_t
 ngx_http_index_handler(ngx_http_request_t *r)
 {
@@ -109,10 +132,12 @@ ngx_http_index_handler(ngx_http_request_t *r)
     ngx_http_index_loc_conf_t    *ilcf;
     ngx_http_script_len_code_pt   lcode;
 
+    //只处理/结尾的请求
     if (r->uri.data[r->uri.len - 1] != '/') {
         return NGX_DECLINED;
     }
 
+    //GET|HEAD|POST
     if (!(r->method & (NGX_HTTP_GET|NGX_HTTP_HEAD|NGX_HTTP_POST))) {
         return NGX_DECLINED;
     }
@@ -129,18 +154,19 @@ ngx_http_index_handler(ngx_http_request_t *r)
     e.status = 0;
 
     index = ilcf->indices->elts;
+    //遍历每个index配置项
     for (i = 0; i < ilcf->indices->nelts; i++) {
 
-        if (index[i].lengths == NULL) {
+        if (index[i].lengths == NULL) { //普通变量
 
-            if (index[i].name.data[0] == '/') {
+            if (index[i].name.data[0] == '/') {     //表示内部重定向
                 return ngx_http_internal_redirect(r, &index[i].name, &r->args);
             }
 
             reserve = ilcf->max_index_len;
             len = index[i].name.len;
 
-        } else {
+        } else {                        //复杂变量
             ngx_memzero(&e, sizeof(ngx_http_script_engine_t));
 
             e.ip = index[i].lengths->elts;
@@ -162,6 +188,7 @@ ngx_http_index_handler(ngx_http_request_t *r)
 
         if (reserve > allocated) {
 
+            //请求url映射为本地文件
             name = ngx_http_map_uri_to_path(r, &path, &root, reserve);
             if (name == NULL) {
                 return NGX_HTTP_INTERNAL_SERVER_ERROR;
@@ -225,6 +252,7 @@ ngx_http_index_handler(ngx_http_request_t *r)
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         }
 
+        //尝试打开文件
         if (ngx_open_cached_file(clcf->open_file_cache, &path, &of, r->pool)
             != NGX_OK)
         {
@@ -251,6 +279,7 @@ ngx_http_index_handler(ngx_http_request_t *r)
             }
 
             if (!dir_tested) {
+                //是否是目录
                 rc = ngx_http_index_test_dir(r, clcf, path.data, name - 1);
 
                 if (rc != NGX_OK) {
@@ -292,6 +321,9 @@ ngx_http_index_handler(ngx_http_request_t *r)
 }
 
 
+/**
+ * 测试是否是一个有效的目录
+ */
 static ngx_int_t
 ngx_http_index_test_dir(ngx_http_request_t *r, ngx_http_core_loc_conf_t *clcf,
     u_char *path, u_char *last)
@@ -395,6 +427,9 @@ ngx_http_index_error(ngx_http_request_t *r, ngx_http_core_loc_conf_t  *clcf,
 }
 
 
+/**
+ * 创建模块配置结构体
+ */
 static void *
 ngx_http_index_create_loc_conf(ngx_conf_t *cf)
 {
@@ -412,6 +447,9 @@ ngx_http_index_create_loc_conf(ngx_conf_t *cf)
 }
 
 
+/**
+ * 合并模块配置结构体
+ */
 static char *
 ngx_http_index_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 {
@@ -420,12 +458,13 @@ ngx_http_index_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 
     ngx_http_index_t  *index;
 
-    if (conf->indices == NULL) {
+    if (conf->indices == NULL) {    //优先使用本级别配置，如果本级别没配置，使用上级的
         conf->indices = prev->indices;
         conf->max_index_len = prev->max_index_len;
     }
 
     if (conf->indices == NULL) {
+        //使用默认配置
         conf->indices = ngx_array_create(cf->pool, 1, sizeof(ngx_http_index_t));
         if (conf->indices == NULL) {
             return NGX_CONF_ERROR;
@@ -436,6 +475,7 @@ ngx_http_index_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
             return NGX_CONF_ERROR;
         }
 
+        //默认index.html
         index->name.len = sizeof(NGX_HTTP_DEFAULT_INDEX);
         index->name.data = (u_char *) NGX_HTTP_DEFAULT_INDEX;
         index->lengths = NULL;
@@ -450,6 +490,9 @@ ngx_http_index_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 }
 
 
+/**
+ * 安装 content_handler
+ */
 static ngx_int_t
 ngx_http_index_init(ngx_conf_t *cf)
 {
@@ -471,6 +514,14 @@ ngx_http_index_init(ngx_conf_t *cf)
 
 /* TODO: warn about duplicate indices */
 
+/**
+ * 解析配置指令index
+ * 
+ *  location / {
+        index index.$geo.html index.html;
+    }
+ * 
+ */
 static char *
 ngx_http_index_set_index(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -481,6 +532,7 @@ ngx_http_index_set_index(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_http_index_t           *index;
     ngx_http_script_compile_t   sc;
 
+    //初始化动态数组 ilcf->indices
     if (ilcf->indices == NULL) {
         ilcf->indices = ngx_array_create(cf->pool, 2, sizeof(ngx_http_index_t));
         if (ilcf->indices == NULL) {
@@ -492,12 +544,14 @@ ngx_http_index_set_index(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     for (i = 1; i < cf->args->nelts; i++) {
 
+        //只有最后一个配置值可以以'/'开头。/开头的表示是内部重定向路径
         if (value[i].data[0] == '/' && i != cf->args->nelts - 1) {
             ngx_conf_log_error(NGX_LOG_WARN, cf, 0,
                                "only the last index in \"index\" directive "
                                "should be absolute");
         }
 
+        //不能为空
         if (value[i].len == 0) {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                                "index \"%V\" in \"index\" directive is invalid",
@@ -515,14 +569,15 @@ ngx_http_index_set_index(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         index->lengths = NULL;
         index->values = NULL;
 
+        //是否包含变量
         n = ngx_http_script_variables_count(&value[i]);
 
-        if (n == 0) {
+        if (n == 0) {   //不包含变量
             if (ilcf->max_index_len < index->name.len) {
                 ilcf->max_index_len = index->name.len;
             }
 
-            if (index->name.data[0] == '/') {
+            if (index->name.data[0] == '/') {       //最后一个配置项
                 continue;
             }
 
@@ -542,6 +597,7 @@ ngx_http_index_set_index(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         sc.complete_lengths = 1;
         sc.complete_values = 1;
 
+        //编译脚本
         if (ngx_http_script_compile(&sc) != NGX_OK) {
             return NGX_CONF_ERROR;
         }

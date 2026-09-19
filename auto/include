@@ -3,6 +3,7 @@
 # Copyright (C) Nginx, Inc.
 
 
+# 这个工具用来检测是头文件是否支持。需要检测的头文件放在$ngx_include里面，如果支持，则$ngx_found变量的值为yes，并且会产生NGX_HAVE_{ngx_include}的宏定义。
 echo $ngx_n "checking for $ngx_include ...$ngx_c"
 
 cat << END >> $NGX_AUTOCONF_ERR

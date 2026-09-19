@@ -13,12 +13,20 @@
 #include <ngx_core.h>
 
 
+/**
+ * 表示一个文件
+ * 
+ * ngx_buf_t->file
+ */
 struct ngx_file_s {
-    ngx_fd_t                   fd;
-    ngx_str_t                  name;
+    ngx_fd_t                   fd;      // 文件句柄描述符
+    ngx_str_t                  name;    // 文件名称
+    // 文件大小等资源信息，实际就是 Linux系统定义的 stat结构
     ngx_file_info_t            info;
 
+    //该偏移量告诉Nginx现在处理到文件何处了，一般不用设置它，Nginx框架会根据当前发送状态设置它
     off_t                      offset;
+    // 当前文件系统偏移量，一般不用设置它，同样由Nginx框架设置
     off_t                      sys_offset;
 
     ngx_log_t                 *log;
@@ -34,7 +42,9 @@ struct ngx_file_s {
     ngx_event_aio_t           *aio;
 #endif
 
+    //目前未使用
     unsigned                   valid_info:1;
+    //与配置文件中的 directio配置项相对应，在发送大文件时可以设为 1
     unsigned                   directio:1;
 };
 
@@ -47,6 +57,15 @@ typedef ngx_msec_t (*ngx_path_purger_pt) (void *data);
 typedef void (*ngx_path_loader_pt) (void *data);
 
 
+/**
+ * ngx_cycle_t->paths
+ * 
+ * 参考：ngx_start_cache_manager_processes、ngx_cache_loader_process_handler
+ * 
+ *  通过调用模块提供的ngx_add_path() 函数来添加制定路径，这些目录是在读取配置后由nginx创建，此外，可以为每条路径添加两个处理程序：
+        path loader — 启动或重新加载后60秒执行一次，通常，加载程序读取目录并将数据存储在Nginx共享内存中。该处理程序是从专用的nginx进程“nginx cache loader”调用。
+        path manager — 定期执行， 从目录中删除旧文件，并更新 nginx内存，该处理程序是从专用的nginx进程“nginx cache manager”中调用。
+ */
 typedef struct {
     ngx_str_t                  name;
     size_t                     len;

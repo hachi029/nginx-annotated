@@ -73,9 +73,11 @@ struct ngx_http_cache_s {
     time_t                           valid_sec;
     time_t                           updating_sec;
     time_t                           error_sec;
+    //$upstream_cache_last_modified
     time_t                           last_modified;
     time_t                           date;
 
+    //$upstream_cache_etag
     ngx_str_t                        etag;
     ngx_str_t                        vary;
     u_char                           variant[NGX_HTTP_CACHE_KEY_LEN];

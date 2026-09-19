@@ -175,6 +175,9 @@ uint32_t  ngx_crc32c_table256[] = {
 };
 
 
+/**
+ * main函数调用
+ */
 ngx_int_t
 ngx_crc32_table_init(void)
 {

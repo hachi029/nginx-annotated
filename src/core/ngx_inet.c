@@ -16,6 +16,10 @@ static ngx_int_t ngx_inet_add_addr(ngx_pool_t *pool, ngx_url_t *u,
     struct sockaddr *sockaddr, socklen_t socklen, ngx_uint_t total);
 
 
+/**
+ * 点分十进制格式的 IPv4 地址字符串转换为 32 位无符号整数
+ * 返回INADDR_NONE：表示ipv4格式不合法
+ */
 in_addr_t
 ngx_inet_addr(u_char *text, size_t len)
 {
@@ -61,6 +65,9 @@ ngx_inet_addr(u_char *text, size_t len)
 
 #if (NGX_HAVE_INET6)
 
+/**
+ * 用于将 IPv6 地址字符串转换为
+ */
 ngx_int_t
 ngx_inet6_addr(u_char *p, size_t len, u_char *addr)
 {
@@ -179,6 +186,9 @@ ngx_inet6_addr(u_char *p, size_t len, u_char *addr)
 #endif
 
 
+/**
+ * 主要功能是将二进制格式的 IP 地址转换为人类可读的字符串格式（如将 0x7F000001 转换为 127.0.0.1）
+ */
 size_t
 ngx_sock_ntop(struct sockaddr *sa, socklen_t socklen, u_char *text, size_t len,
     ngx_uint_t port)
@@ -371,6 +381,12 @@ ngx_inet6_ntop(u_char *p, u_char *text, size_t len)
 #endif
 
 
+/**
+ * 点分十进制格式的 IP 地址字符串转换为二进制形式
+ * text: 指向点分十进制格式的 IP 地址字符串的指针
+ * cidr: 指向 ngx_cidr_t 结构体的指针，用于存储转换结果
+ * 
+ */
 ngx_int_t
 ngx_ptocidr(ngx_str_t *text, ngx_cidr_t *cidr)
 {
@@ -385,12 +401,12 @@ ngx_ptocidr(ngx_str_t *text, ngx_cidr_t *cidr)
     addr = text->data;
     last = addr + text->len;
 
-    mask = ngx_strlchr(addr, last, '/');
-    len = (mask ? mask : last) - addr;
+    mask = ngx_strlchr(addr, last, '/'); //192.168.1.0/24 查找/的位置
+    len = (mask ? mask : last) - addr;  //len为192.168.1.0的长度
 
-    cidr->u.in.addr = ngx_inet_addr(addr, len);
+    cidr->u.in.addr = ngx_inet_addr(addr, len); //转为无符号 32 位整数
 
-    if (cidr->u.in.addr != INADDR_NONE) {
+    if (cidr->u.in.addr != INADDR_NONE) {       //是一个合法的ipv4地址
         cidr->family = AF_INET;
 
         if (mask == NULL) {
@@ -399,8 +415,9 @@ ngx_ptocidr(ngx_str_t *text, ngx_cidr_t *cidr)
         }
 
 #if (NGX_HAVE_INET6)
+    //尝试解析ipv6地址
     } else if (ngx_inet6_addr(addr, len, cidr->u.in6.addr.s6_addr) == NGX_OK) {
-        cidr->family = AF_INET6;
+        cidr->family = AF_INET6;      //是一个合法的ipv6地址
 
         if (mask == NULL) {
             ngx_memset(cidr->u.in6.mask.s6_addr, 0xff, 16);
@@ -412,10 +429,12 @@ ngx_ptocidr(ngx_str_t *text, ngx_cidr_t *cidr)
         return NGX_ERROR;
     }
 
+    //此处说明mask != NULL
     mask++;
 
+    //mask转为整数
     shift = ngx_atoi(mask, last - mask);
-    if (shift == NGX_ERROR) {
+    if (shift == NGX_ERROR) {   //非整数
         return NGX_ERROR;
     }
 
@@ -684,6 +703,10 @@ ngx_parse_addr_port(ngx_pool_t *pool, ngx_addr_t *addr, u_char *text,
 }
 
 
+/**
+ * 解析url, 将字符串格式的url解析为ngx_url_t结构体， 涉及url中host的dns解析（这里的解析是阻塞的）
+ * u: ngx_url_t结构体
+ */
 ngx_int_t
 ngx_parse_url(ngx_pool_t *pool, ngx_url_t *u)
 {
@@ -693,14 +716,17 @@ ngx_parse_url(ngx_pool_t *pool, ngx_url_t *u)
     p = u->url.data;
     len = u->url.len;
 
+    //unix 套接字
     if (len >= 5 && ngx_strncasecmp(p, (u_char *) "unix:", 5) == 0) {
         return ngx_parse_unix_domain_url(pool, u);
     }
 
+    //ipv6
     if (len && p[0] == '[') {
         return ngx_parse_inet6_url(pool, u);
     }
 
+    //域名或ipv4
     return ngx_parse_inet_url(pool, u);
 }
 
@@ -783,6 +809,9 @@ ngx_parse_unix_domain_url(ngx_pool_t *pool, ngx_url_t *u)
 }
 
 
+/**
+ * 从一个字符串形式url解析ngx_url_t结构体, 解析出host port 
+ */
 static ngx_int_t
 ngx_parse_inet_url(ngx_pool_t *pool, ngx_url_t *u)
 {
@@ -874,6 +903,7 @@ ngx_parse_inet_url(ngx_pool_t *pool, ngx_url_t *u)
         last = port - 1;
 
     } else {
+        //默认端口
         if (uri == NULL) {
 
             if (u->listen) {
@@ -972,10 +1002,12 @@ no_port:
         return ngx_inet_add_addr(pool, u, &u->sockaddr.sockaddr, u->socklen, 1);
     }
 
+    //不进行dns解析
     if (u->no_resolve) {
         return NGX_OK;
     }
 
+    //域名解析
     if (ngx_inet_resolve_host(pool, u) != NGX_OK) {
         return NGX_ERROR;
     }
@@ -1117,6 +1149,14 @@ ngx_parse_inet6_url(ngx_pool_t *pool, ngx_url_t *u)
 
 #if (NGX_HAVE_GETADDRINFO && NGX_HAVE_INET6)
 
+/**
+ * 解析域名或IP地址, 并将结果存储在ngx_url_t结构体中
+ * pool: 内存池
+ * u: ngx_url_t结构体（可仅设置其host和port）
+ * 
+ * 该函数实际上是封装了getaddrinfo函数，是同步阻塞解析。
+ * 
+ */
 ngx_int_t
 ngx_inet_resolve_host(ngx_pool_t *pool, ngx_url_t *u)
 {
@@ -1138,6 +1178,12 @@ ngx_inet_resolve_host(ngx_pool_t *pool, ngx_url_t *u)
     hints.ai_flags = AI_ADDRCONFIG;
 #endif
 
+    /**
+     *  int getaddrinfo(const char *node,       // 主机名（如 "example.com"）或 IP 地址
+     *  const char *service,                    // 服务名（如 "http"）或端口号（如 "80"）
+     *  const struct addrinfo *hints,           // 可选的地址筛选条件
+     *  struct addrinfo **res);                 // 返回的地址信息链表
+     */
     if (getaddrinfo((char *) host, NULL, &hints, &res) != 0) {
         u->err = "host not found";
         ngx_free(host);
@@ -1263,6 +1309,15 @@ ngx_inet_resolve_host(ngx_pool_t *pool, ngx_url_t *u)
 #endif /* NGX_HAVE_GETADDRINFO && NGX_HAVE_INET6 */
 
 
+/**
+ * 用于处理 ngx_url_t 结构体并将解析后的地址信息填充到 sockaddr 中
+ * 
+ * pool：Nginx 内存池，用于分配内存
+ * u：指向 ngx_url_t 结构体的指针，包含解析后的 URL 信息
+ * sockaddr：输出参数，存储解析后的套接字地址
+ * socklen：sockaddr 结构体的长度
+ * total：已解析的地址总数（用于错误处理）
+ */
 static ngx_int_t
 ngx_inet_add_addr(ngx_pool_t *pool, ngx_url_t *u, struct sockaddr *sockaddr,
     socklen_t socklen, ngx_uint_t total)
@@ -1273,9 +1328,11 @@ ngx_inet_add_addr(ngx_pool_t *pool, ngx_url_t *u, struct sockaddr *sockaddr,
     ngx_addr_t       *addr;
     struct sockaddr  *sa;
 
+    //端口个数
     nports = u->last_port ? u->last_port - u->port + 1 : 1;
 
     if (u->addrs == NULL) {
+        //地址总个数为 total * nports 
         u->addrs = ngx_palloc(pool, total * nports * sizeof(ngx_addr_t));
         if (u->addrs == NULL) {
             return NGX_ERROR;
@@ -1283,13 +1340,16 @@ ngx_inet_add_addr(ngx_pool_t *pool, ngx_url_t *u, struct sockaddr *sockaddr,
     }
 
     for (i = 0; i < nports; i++) {
+        //创建一个sockaddr
         sa = ngx_pcalloc(pool, socklen);
         if (sa == NULL) {
             return NGX_ERROR;
         }
 
+        //复制sockaddr到sa
         ngx_memcpy(sa, sockaddr, socklen);
 
+        //设置端口号
         ngx_inet_set_port(sa, u->port + i);
 
         switch (sa->sa_family) {
@@ -1309,6 +1369,7 @@ ngx_inet_add_addr(ngx_pool_t *pool, ngx_url_t *u, struct sockaddr *sockaddr,
             return NGX_ERROR;
         }
 
+        //将二进制格式的sockaddr转换为人可读的字符串形式
         len = ngx_sock_ntop(sa, socklen, p, len, 1);
 
         addr = &u->addrs[u->naddrs++];
@@ -1404,6 +1465,9 @@ ngx_cmp_sockaddr(struct sockaddr *sa1, socklen_t slen1,
 }
 
 
+/**
+ * 从sa中获取端口
+ */
 in_port_t
 ngx_inet_get_port(struct sockaddr *sa)
 {
@@ -1432,6 +1496,9 @@ ngx_inet_get_port(struct sockaddr *sa)
 }
 
 
+/**
+ * 设置sa的端口号为指定的port
+ */
 void
 ngx_inet_set_port(struct sockaddr *sa, in_port_t port)
 {
@@ -1462,6 +1529,10 @@ ngx_inet_set_port(struct sockaddr *sa, in_port_t port)
 }
 
 
+/**
+ * 判断某个套接字地址是否为通配符地址
+ * 如0.0.0.0 或 ::
+ */
 ngx_uint_t
 ngx_inet_wildcard(struct sockaddr *sa)
 {

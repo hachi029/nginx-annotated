@@ -14,9 +14,9 @@
 
 
 typedef struct {
-    time_t      sec;
-    ngx_uint_t  msec;
-    ngx_int_t   gmtoff;
+    time_t      sec;        // 格林威治时间 1970年 1月1日凌晨 0点0分0秒到当前时间的秒数
+    ngx_uint_t  msec;   // sec成员只能精确到秒， msec则是当前时间相对于 sec的毫秒偏移量
+    ngx_int_t   gmtoff; //时区
 } ngx_time_t;
 
 
@@ -33,7 +33,9 @@ time_t ngx_next_time(time_t when);
 
 extern volatile ngx_time_t  *ngx_cached_time;
 
+//以秒为单位返回当前时间值
 #define ngx_time()           ngx_cached_time->sec
+//以秒为单位返回当前时间值, 是访问缓存时间值的首选方法. 获取更准确的时间, 使用 ngx_gettimeofday()
 #define ngx_timeofday()      (ngx_time_t *) ngx_cached_time
 
 extern volatile ngx_str_t    ngx_cached_err_log_time;

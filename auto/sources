@@ -3,6 +3,10 @@
 # Copyright (C) Nginx, Inc.
 
 
+#该文件从文件名中就可以看出，它的主要功能是跟源文件相关的。它的主要作用是定义不同功能或系统所需要的文件的变量。
+#根据功能，分为CORE/REGEX/EVENT/UNIX/FREEBSD/HTTP等。每一个功能将会由四个变量组成，”_MODULES”表示此功能相关的模块，
+#最终会输出到ngx_modules.c文件中，即动态生成需要编译到nginx中的模块；”INCS”表示此功能依赖的源码目录，查找头文件的时候会用到，
+#在编译选项中，会出现在”-I”中；”DEPS”显示指明在Makefile中需要依赖的文件名，即编译时，需要检查这些文件的更新时间；”SRCS”表示需要此功能编译需要的源文件。
 CORE_MODULES="ngx_core_module ngx_errlog_module ngx_conf_module"
 
 CORE_INCS="src/core"

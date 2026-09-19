@@ -58,6 +58,8 @@ void ngx_localtime(time_t s, ngx_tm_t *tm);
 void ngx_libc_localtime(time_t s, struct tm *tm);
 void ngx_libc_gmtime(time_t s, struct tm *tm);
 
+//获取更准确的时间, 使用 ngx_gettimeofday(), 会实时更新参数 struct timeval
+//当nginx从系统调用返回事件循环时，会完成时间更新。如果要立即更新时间，可以调用 ngx_time_update(), 也可以通过信号方式，通过信号处理函数 ngx_time_sigsafe_update() 更新时间
 #define ngx_gettimeofday(tp)  (void) gettimeofday(tp, NULL);
 #define ngx_msleep(ms)        (void) usleep(ms * 1000)
 #define ngx_sleep(s)          (void) sleep(s)
