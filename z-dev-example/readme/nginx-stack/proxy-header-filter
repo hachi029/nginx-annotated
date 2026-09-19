@@ -1,0 +1,46 @@
+#0  ngx_http_write_filter (r=0x16072c0, in=0x7ffc6a01cf80) at src/http/ngx_http_write_filter_module.c:57
+#1  0x00000000004ab0f4 in ngx_http_header_filter (r=0x16072c0) at src/http/ngx_http_header_filter_module.c:624
+#2  0x00000000004ab2de in ngx_http_chunked_header_filter (r=0x16072c0) at src/http/modules/ngx_http_chunked_filter_module.c:100
+#3  0x00000000004abcff in ngx_http_range_header_filter (r=0x16072c0) at src/http/modules/ngx_http_range_filter_module.c:161
+#4  0x00000000004adad6 in ngx_http_gzip_header_filter (r=0x16072c0) at src/http/modules/ngx_http_gzip_filter_module.c:240
+#5  0x00000000004afe1a in ngx_http_ssi_header_filter (r=0x16072c0) at src/http/modules/ngx_http_ssi_filter_module.c:341
+#6  0x00000000004b597e in ngx_http_charset_header_filter (r=0x16072c0) at src/http/modules/ngx_http_charset_filter_module.c:236
+#7  0x00000000004b8c1b in ngx_http_userid_filter (r=0x16072c0) at src/http/modules/ngx_http_userid_filter_module.c:239
+#8  0x00000000004ba289 in ngx_http_headers_filter (r=0x16072c0) at src/http/modules/ngx_http_headers_filter_module.c:183
+#9  0x00000000004bbb38 in ngx_http_not_modified_header_filter (r=0x16072c0) at src/http/modules/ngx_http_not_modified_filter_module.c:61
+#10 0x000000000046f0c2 in ngx_http_send_header (r=0x16072c0) at src/http/ngx_http_core_module.c:1856
+#11 0x0000000000496fcb in ngx_http_upstream_send_response (r=0x16072c0, u=0x15fda60) at src/http/ngx_http_upstream.c:3065
+#12 0x0000000000495efa in ngx_http_upstream_process_header (r=0x16072c0, u=0x15fda60) at src/http/ngx_http_upstream.c:2566
+#13 0x000000000049381b in ngx_http_upstream_handler (ev=0x1617e00) at src/http/ngx_http_upstream.c:1321
+#14 0x0000000000455df3 in ngx_epoll_process_events (cycle=0x15eede0, timer=60000, flags=1) at src/event/modules/ngx_epoll_module.c:901
+#15 0x0000000000446aee in ngx_process_events_and_timers (cycle=0x15eede0) at src/event/ngx_event.c:248
+#16 0x0000000000453a75 in ngx_worker_process_cycle (cycle=0x15eede0, data=0x0) at src/os/unix/ngx_process_cycle.c:721
+#17 0x0000000000450b5b in ngx_spawn_process (cycle=0x15eede0, proc=0x4539c7 <ngx_worker_process_cycle>, data=0x0,
+    name=0x4f8dff "worker process", respawn=-3) at src/os/unix/ngx_process.c:199
+#18 0x0000000000452d8b in ngx_start_worker_processes (cycle=0x15eede0, n=1, type=-3) at src/os/unix/ngx_process_cycle.c:344
+#19 0x00000000004525d4 in ngx_master_process_cycle (cycle=0x15eede0) at src/os/unix/ngx_process_cycle.c:130
+#20 0x0000000000411e05 in main (argc=1, argv=0x7ffc6a01d988) at src/core/nginx.c:384
+
+
+
+#0  ngx_http_upstream_connect (r=0x16072c0, u=0x15fda60) at src/http/ngx_http_upstream.c:1556
+#1  0x00000000004928cf in ngx_http_upstream_init_request (r=0x16072c0) at src/http/ngx_http_upstream.c:841
+#2  0x0000000000491d65 in ngx_http_upstream_init (r=0x16072c0) at src/http/ngx_http_upstream.c:569
+#3  0x0000000000486465 in ngx_http_read_client_request_body (r=0x16072c0, post_handler=0x491cc5 <ngx_http_upstream_init>)
+    at src/http/ngx_http_request_body.c:84
+#4  0x00000000004d058a in ngx_http_proxy_handler (r=0x16072c0) at src/http/modules/ngx_http_proxy_module.c:1043
+#5  0x000000000046dd7a in ngx_http_core_content_phase (r=0x16072c0, ph=0x1611230) at src/http/ngx_http_core_module.c:1268
+#6  0x000000000046d111 in ngx_http_core_run_phases (r=0x16072c0) at src/http/ngx_http_core_module.c:882
+#7  0x000000000046d07e in ngx_http_handler (r=0x16072c0) at src/http/ngx_http_core_module.c:865
+#8  0x000000000047c2c8 in ngx_http_process_request (r=0x16072c0) at src/http/ngx_http_request.c:2164
+#9  0x000000000047abea in ngx_http_process_request_headers (rev=0x1617da0) at src/http/ngx_http_request.c:1553
+#10 0x000000000047a153 in ngx_http_process_request_line (rev=0x1617da0) at src/http/ngx_http_request.c:1220
+#11 0x0000000000478c32 in ngx_http_wait_request_handler (rev=0x1617da0) at src/http/ngx_http_request.c:523
+#12 0x0000000000455df3 in ngx_epoll_process_events (cycle=0x15eede0, timer=60000, flags=1) at src/event/modules/ngx_epoll_module.c:901
+#13 0x0000000000446aee in ngx_process_events_and_timers (cycle=0x15eede0) at src/event/ngx_event.c:248
+#14 0x0000000000453a75 in ngx_worker_process_cycle (cycle=0x15eede0, data=0x0) at src/os/unix/ngx_process_cycle.c:721
+#15 0x0000000000450b5b in ngx_spawn_process (cycle=0x15eede0, proc=0x4539c7 <ngx_worker_process_cycle>, data=0x0,
+    name=0x4f8dff "worker process", respawn=-3) at src/os/unix/ngx_process.c:199
+#16 0x0000000000452d8b in ngx_start_worker_processes (cycle=0x15eede0, n=1, type=-3) at src/os/unix/ngx_process_cycle.c:344
+#17 0x00000000004525d4 in ngx_master_process_cycle (cycle=0x15eede0) at src/os/unix/ngx_process_cycle.c:130
+#18 0x0000000000411e05 in main (argc=1, argv=0x7ffc6a01d988) at src/core/nginx.c:384

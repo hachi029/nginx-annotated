@@ -11,6 +11,9 @@
 
 #if (NGX_HAVE_MAP_ANON)
 
+/**
+ * 使用mmap实现ngx_shm_alloc方法
+ */
 ngx_int_t
 ngx_shm_alloc(ngx_shm_t *shm)
 {
@@ -31,6 +34,9 @@ ngx_shm_alloc(ngx_shm_t *shm)
 void
 ngx_shm_free(ngx_shm_t *shm)
 {
+    //start参数指向共享内存的首地址，
+    //length参数表示这段共享内存的长度
+    // 使用 ngx_shm_t中的 addr和 size参数调用 munmap释放共享内存即可
     if (munmap((void *) shm->addr, shm->size) == -1) {
         ngx_log_error(NGX_LOG_ALERT, shm->log, ngx_errno,
                       "munmap(%p, %uz) failed", shm->addr, shm->size);

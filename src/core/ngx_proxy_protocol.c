@@ -50,6 +50,7 @@
     + (           (p)[3]) )
 
 
+ //v2版本的proxy_protocol协议
 typedef struct {
     u_char                                  signature[12];
     u_char                                  version_command;
@@ -156,6 +157,19 @@ static ngx_proxy_protocol_tlv_entry_t  ngx_proxy_protocol_tlv_ssl_entries[] = {
 static const u_char  ngx_proxy_protocol_signature[] = "\r\n\r\n\0\r\nQUIT\n";
 
 
+/**
+ * https://www.cnblogs.com/flydean/p/16317933.html
+ * 
+ * ngx_http_wait_request_handler->.
+ * ngx_http_ssl_handshake->.
+ * 
+ * PROXY协议处理
+ * 一个使用了proxy_header的http请求。（v1）
+ *  PROXY TCP4 192.168.0.1 192.168.0.102 12345 443\r\n
+    GET / HTTP/1.1\r\n
+    Host: 192.168.0.102\r\n
+    调用方式 ngx_proxy_protocol_read(c, b->pos, b->last)
+ */
 u_char *
 ngx_proxy_protocol_read(ngx_connection_t *c, u_char *buf, u_char *last)
 {
@@ -166,11 +180,13 @@ ngx_proxy_protocol_read(ngx_connection_t *c, u_char *buf, u_char *last)
     p = buf;
     len = last - buf;
 
+    //  通过signature判断是否是v2协议。
     if (len >= sizeof(ngx_proxy_protocol_header_t)
         && ngx_memcmp(p, ngx_proxy_protocol_signature,
                       sizeof(ngx_proxy_protocol_signature) - 1)
            == 0)
     {
+        //进入v2协议解析流程
         return ngx_proxy_protocol_v2_read(c, buf, last);
     }
 
@@ -181,9 +197,11 @@ ngx_proxy_protocol_read(ngx_connection_t *c, u_char *buf, u_char *last)
     p += 6;
     len -= 6;
 
+    // 未知的协议，可能客户端和代理通过socket域连接
     if (len >= 7 && ngx_strncmp(p, "UNKNOWN", 7) == 0) {
         ngx_log_debug0(NGX_LOG_DEBUG_CORE, c->log, 0,
                        "PROXY protocol unknown protocol");
+        //如果是 PROXY UNKNOWN
         p += 7;
         goto skip;
     }
@@ -191,36 +209,44 @@ ngx_proxy_protocol_read(ngx_connection_t *c, u_char *buf, u_char *last)
     if (len < 5 || ngx_strncmp(p, "TCP", 3) != 0
         || (p[3] != '4' && p[3] != '6') || p[4] != ' ')
     {
+        // 代理协议只支持tcp4和tcp6
+        //如果不是PROXY TCP4或 PROXY TCP6
         goto invalid;
     }
 
     p += 5;
 
+    //创建一个ngx_proxy_protocol_t结构体
     pp = ngx_pcalloc(c->pool, sizeof(ngx_proxy_protocol_t));
     if (pp == NULL) {
         return NULL;
     }
 
+    //读取源地址
     p = ngx_proxy_protocol_read_addr(c, p, last, &pp->src_addr);
     if (p == NULL) {
         goto invalid;
     }
 
+    //读取目的地址
     p = ngx_proxy_protocol_read_addr(c, p, last, &pp->dst_addr);
     if (p == NULL) {
         goto invalid;
     }
 
+    //读取源端口
     p = ngx_proxy_protocol_read_port(p, last, &pp->src_port, ' ');
     if (p == NULL) {
         goto invalid;
     }
 
+    //读取目的端口
     p = ngx_proxy_protocol_read_port(p, last, &pp->dst_port, CR);
     if (p == NULL) {
         goto invalid;
     }
 
+    //应该还有\n\r标识
     if (p == last) {
         goto invalid;
     }
@@ -233,6 +259,7 @@ ngx_proxy_protocol_read(ngx_connection_t *c, u_char *buf, u_char *last)
                    "PROXY protocol src: %V %d, dst: %V %d",
                    &pp->src_addr, pp->src_port, &pp->dst_addr, pp->dst_port);
 
+    //设置解析结果
     c->proxy_protocol = pp;
 
     return p;
@@ -247,6 +274,7 @@ skip:
 
 invalid:
 
+    //一直到\r\n 之前的字符会被忽略
     for (p = buf; p < last; p++) {
         if (*p == CR || *p == LF) {
             break;
@@ -260,6 +288,9 @@ invalid:
 }
 
 
+/**
+ * proxy_protocol 读取地址
+ */
 static u_char *
 ngx_proxy_protocol_read_addr(ngx_connection_t *c, u_char *p, u_char *last,
     ngx_str_t *addr)
@@ -303,6 +334,9 @@ ngx_proxy_protocol_read_addr(ngx_connection_t *c, u_char *p, u_char *last,
 }
 
 
+/**
+ * proxy_protocol 读取端口
+ */
 static u_char *
 ngx_proxy_protocol_read_port(u_char *p, u_char *last, in_port_t *port,
     u_char sep)
@@ -336,6 +370,9 @@ ngx_proxy_protocol_read_port(u_char *p, u_char *last, in_port_t *port,
 }
 
 
+/**
+ * 拼接代理协议字符串
+ **/ 
 u_char *
 ngx_proxy_protocol_write(ngx_connection_t *c, u_char *buf, u_char *last)
 {
@@ -382,6 +419,10 @@ ngx_proxy_protocol_write(ngx_connection_t *c, u_char *buf, u_char *last)
 }
 
 
+/**
+ * ngx_proxy_protocol_read->.
+ * proxy_protocol协议v2解析
+ */
 static u_char *
 ngx_proxy_protocol_v2_read(ngx_connection_t *c, u_char *buf, u_char *last)
 {
@@ -399,8 +440,10 @@ ngx_proxy_protocol_v2_read(ngx_connection_t *c, u_char *buf, u_char *last)
 
     header = (ngx_proxy_protocol_header_t *) buf;
 
+    // buf指向报文体
     buf += sizeof(ngx_proxy_protocol_header_t);
 
+     // 4bit版本， 目前只能等于2
     version = header->version_command >> 4;
 
     if (version != 2) {
@@ -409,15 +452,19 @@ ngx_proxy_protocol_v2_read(ngx_connection_t *c, u_char *buf, u_char *last)
         return NULL;
     }
 
+    // 报文体长度
     len = ngx_proxy_protocol_parse_uint16(header->len);
 
     if ((size_t) (last - buf) < len) {
+        // 读到的内容太少
         ngx_log_error(NGX_LOG_ERR, c->log, 0, "header is too large");
         return NULL;
     }
 
+    // 报文体结尾
     end = buf + len;
 
+    // 4bit command，仅支持PROXY，所以只能等于1
     command = header->version_command & 0x0f;
 
     /* only PROXY is supported */
@@ -427,6 +474,7 @@ ngx_proxy_protocol_v2_read(ngx_connection_t *c, u_char *buf, u_char *last)
         return end;
     }
 
+    // 4bit 传输协议，仅支持STREAM，所以只能等于1
     transport = header->family_transport & 0x0f;
 
     /* only STREAM is supported */
@@ -437,6 +485,7 @@ ngx_proxy_protocol_v2_read(ngx_connection_t *c, u_char *buf, u_char *last)
         return end;
     }
 
+    // 4bit family
     pp = ngx_pcalloc(c->pool, sizeof(ngx_proxy_protocol_t));
     if (pp == NULL) {
         return NULL;
@@ -446,12 +495,15 @@ ngx_proxy_protocol_v2_read(ngx_connection_t *c, u_char *buf, u_char *last)
 
     switch (family) {
 
+    // ipv4
     case NGX_PROXY_PROTOCOL_AF_INET:
 
+        // 判断报文体长度
         if ((size_t) (end - buf) < sizeof(ngx_proxy_protocol_inet_addrs_t)) {
             return NULL;
         }
 
+        // 报文体映射成ngx的结构体
         in = (ngx_proxy_protocol_inet_addrs_t *) buf;
 
         src_sockaddr.sockaddr_in.sin_family = AF_INET;
@@ -473,6 +525,7 @@ ngx_proxy_protocol_v2_read(ngx_connection_t *c, u_char *buf, u_char *last)
 
 #if (NGX_HAVE_INET6)
 
+    // ipv6
     case NGX_PROXY_PROTOCOL_AF_INET6:
 
         if ((size_t) (end - buf) < sizeof(ngx_proxy_protocol_inet6_addrs_t)) {
@@ -537,8 +590,10 @@ ngx_proxy_protocol_v2_read(ngx_connection_t *c, u_char *buf, u_char *last)
         pp->tlvs.len = end - buf;
     }
 
+    //设置最终解析结果
     c->proxy_protocol = pp;
 
+    //返回结果为proxy_protocol后的第一个位置
     return end;
 }
 

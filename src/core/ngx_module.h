@@ -224,31 +224,84 @@
 #define NGX_MODULE_V1_PADDING  0, 0, 0, 0, 0, 0, 0, 0
 
 
+/**
+ * https://nginx.org/en/docs/dev/development_guide.html#core_modules
+ * Modules are the building blocks of nginx, and most of its functionality is implemented as modules. 
+ * The module source file must contain a global variable of type ngx_module_t.
+ * 
+ * The module lifecycle consists of the following events:
+ * 1.Configuration directive handlers are called as they appear in configuration files in the context of the master process.
+ * 2.After the configuration is parsed successfully, init_module handler is called in the context of the master process. 
+ *   The init_module handler is called in the master process each time a configuration is loaded.
+ * 3.The master process creates one or more worker processes and the init_process handler is called in each of them.
+ * 4.When a worker process receives the shutdown or terminate command from the master, it invokes the exit_process handler.
+ * 5.The master process calls the exit_master handler before exiting.
+ */
+/**
+ * 作为所有模块的通用接口
+ */
 struct ngx_module_s {
+    //ctx_index表明了模块在相同类型模块中的顺序
     ngx_uint_t            ctx_index;
+    //index是模块在ngx_modules.c中所有模块数组的索引，作为模块的唯一标识
     ngx_uint_t            index;
 
+    // 模块的名字，标识字符串，默认是空指针
+    // 由脚本生成ngx_module_names数组，然后在ngx_preinit_modules里填充
+    // 动态模块在ngx_load_module里设置名字,以\0结尾
     char                 *name;
 
     ngx_uint_t            spare0;
     ngx_uint_t            spare1;
 
+    /* 模块版本 */
     ngx_uint_t            version;
+    // 模块的二进制兼容性签名，即NGX_MODULE_SIGNATURE
     const char           *signature;
 
     void                 *ctx;
+     //模块定义的指令，指向第一个指令地址，最后一个置null标识数组结束
     ngx_command_t        *commands;
+    /**
+     * The module type defines exactly what is stored in the ctx field. 
+     * The NGX_CORE_MODULE is the most basic and thus the most generic and most low-level type of module. 
+     * The other module types are implemented on top of it and provide a more convenient way to deal with corresponding domains, like handling events or HTTP requests.
+     * 
+     * type表示该模块的类型，它与 ctx指针是紧密相关的。在官方 Nginx中，它的取值范围是以下 6种
+     * NGX_HTTP_MODULE、NGX_CORE_MODULE、NGX_CONF_MODULE、NGX_EVENT_MODULE、NGX_STREAM_MODULE、NGX_MAIL_MODULE
+     */
     ngx_uint_t            type;
 
     ngx_int_t           (*init_master)(ngx_log_t *log);
 
+    /**
+     * 在初始化所有模块时被调用。
+     * 
+     * 在master/worker模式下，这个阶段将在master进程ngx_init_cycle完成
+     */
     ngx_int_t           (*init_module)(ngx_cycle_t *cycle);
 
+    /**
+     * init_process回调方法在正常服务前被调用。
+     * 
+     * 在 master/worker模式下，在每个 worker进程的初始化过程会调用所有模块的init_process函数
+     */
     ngx_int_t           (*init_process)(ngx_cycle_t *cycle);
+     // init_thread目前nginx不会调用
     ngx_int_t           (*init_thread)(ngx_cycle_t *cycle);
+    // exit_thread目前nginx不会调用
     void                (*exit_thread)(ngx_cycle_t *cycle);
+    /**
+     *  exit_process回调方法在服务停止前调用。
+     * 
+     *  在 master/worker模式下， worker进程会在退出前调用它
+     */
     void                (*exit_process)(ngx_cycle_t *cycle);
 
+    /**
+     * exit_master回调方法将在 master进程退出前被调用
+     *
+     * */ 
     void                (*exit_master)(ngx_cycle_t *cycle);
 
     uintptr_t             spare_hook0;
@@ -262,9 +315,17 @@ struct ngx_module_s {
 };
 
 
+/**
+ * 核心模块NGX_CORE_MODULE类型的接口(ngx_module_s->ctx). ngx_module_s->ctx 核心模块的上下文，主要定义了创建配置和初始化配置的结构
+ * 
+ * For core modules, nginx calls create_conf before parsing a new configuration and init_conf after all configuration is parsed successfully.
+ */
 typedef struct {
+    // 核心模块名称
     ngx_str_t             name;
+    //解析配置项前， Nginx框架会调用 create_conf方法, 创建存储配置项的数据结构
     void               *(*create_conf)(ngx_cycle_t *cycle);
+    //解析配置项完成后， Nginx框架会调用 init_conf方法, 在解析完nginx.conf配置文件后，使用解析出的配置项初始化核心模块功能。
     char               *(*init_conf)(ngx_cycle_t *cycle, void *conf);
 } ngx_core_module_t;
 
@@ -279,6 +340,7 @@ ngx_int_t ngx_add_module(ngx_conf_t *cf, ngx_str_t *file,
     ngx_module_t *module, char **order);
 
 
+/* 模块数组，所有的模块都会保存在此数组中   共有四种类型模块："CORE","CONF","EVNT","HTTP" */
 extern ngx_module_t  *ngx_modules[];
 extern ngx_uint_t     ngx_max_module;
 

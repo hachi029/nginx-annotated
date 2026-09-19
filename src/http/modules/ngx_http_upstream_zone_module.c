@@ -46,6 +46,17 @@ static ngx_command_t  ngx_http_upstream_zone_commands[] = {
 };
 
 
+/**
+ * https://blog.csdn.net/bluestn/article/details/136533442
+ * 
+ * 用于worker之间upstream server状态共享
+ * 
+ * 当upstream的配置加载完成后，ngx_http_upstream_zone_module模块会把peer信息拷贝到分配好的共享内存中，
+ * 后续每个worker就在共享内存中进行peer信息的读写，从而解决worker之间peer信息不一致的问题，通过共享内存的方式，
+ * 甚至可以很方便地实现Real Server的运行时动态增删改操作（在nginx的商业版中提供了这个能力）。
+ * 当然由于是多进程共享，因此需要必然需要用到跨进程的读写锁，在一定程度上可能对性能有些许影响。
+ * 
+ */
 static ngx_http_module_t  ngx_http_upstream_zone_module_ctx = {
     NULL,                                  /* preconfiguration */
     NULL,                                  /* postconfiguration */
@@ -77,6 +88,13 @@ ngx_module_t  ngx_http_upstream_zone_module = {
 };
 
 
+/**
+ * https://nginx.org/en/docs/http/ngx_http_upstream_module.html#zone
+ * 
+ * zone name [size];
+ * 
+ * zone配置指令解析
+ */
 static char *
 ngx_http_upstream_zone(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -90,6 +108,7 @@ ngx_http_upstream_zone(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     value = cf->args->elts;
 
+    //zone名称
     if (!value[1].len) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "invalid zone name \"%V\"", &value[1]);
@@ -97,6 +116,7 @@ ngx_http_upstream_zone(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     }
 
     if (cf->args->nelts == 3) {
+        //zone size
         size = ngx_parse_size(&value[2]);
 
         if (size == NGX_ERROR) {
@@ -105,6 +125,7 @@ ngx_http_upstream_zone(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             return NGX_CONF_ERROR;
         }
 
+        //不能小于8页
         if (size < (ssize_t) (8 * ngx_pagesize)) {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                                "zone \"%V\" is too small", &value[1]);
@@ -115,6 +136,7 @@ ngx_http_upstream_zone(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         size = 0;
     }
 
+    //尝试从&cf->cycle->shared_memory 链表中查找相同名称的zone， 如果未找到，则新建一个
     uscf->shm_zone = ngx_shared_memory_add(cf, &value[1], size,
                                            &ngx_http_upstream_module);
     if (uscf->shm_zone == NULL) {
@@ -130,6 +152,9 @@ ngx_http_upstream_zone(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * shm_zone 初始化函数
+ */
 static ngx_int_t
 ngx_http_upstream_init_zone(ngx_shm_zone_t *shm_zone, void *data)
 {
@@ -144,6 +169,7 @@ ngx_http_upstream_init_zone(ngx_shm_zone_t *shm_zone, void *data)
     umcf = shm_zone->data;
     uscfp = umcf->upstreams.elts;
 
+    //是否已经分配过了
     if (shm_zone->shm.exists) {
         peers = shpool->data;
 
@@ -161,6 +187,7 @@ ngx_http_upstream_init_zone(ngx_shm_zone_t *shm_zone, void *data)
         return NGX_OK;
     }
 
+    //log_ctx长度
     len = sizeof(" in upstream zone \"\"") + shm_zone->shm.name.len;
 
     shpool->log_ctx = ngx_slab_alloc(shpool, len);

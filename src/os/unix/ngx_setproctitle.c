@@ -75,6 +75,9 @@ ngx_init_setproctitle(ngx_log_t *log)
 }
 
 
+/**
+ * 设置进程标题，main函数调用
+ */
 void
 ngx_setproctitle(char *title)
 {

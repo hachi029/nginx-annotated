@@ -14,6 +14,9 @@
 #include <ngx_http.h>
 
 
+/**
+ * 本模块在srv级别的配置结构体
+ */
 typedef struct {
     ngx_ssl_t                       ssl;
 
