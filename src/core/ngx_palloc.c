@@ -356,8 +356,9 @@ ngx_palloc_large(ngx_pool_t *pool, size_t size)
         return NULL;
     }
 
-    // 加入大块内存链表
+    //alloc成员置为分配的内存地址
     large->alloc = p;
+    //将ngx_pool_large_t添加到ngx_pool_t的large链表首部，返回地址
     large->next = pool->large;
     pool->large = large;
 
@@ -365,6 +366,7 @@ ngx_palloc_large(ngx_pool_t *pool, size_t size)
 }
 
 
+// 字节对齐分配大块内存
 void *
 ngx_pmemalign(ngx_pool_t *pool, size_t size, size_t alignment)
 {

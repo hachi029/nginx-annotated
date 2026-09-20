@@ -684,8 +684,8 @@ ngx_http_upstream_keepalive(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_int_t    n;
     ngx_str_t   *value;
 
-    if (kcf->max_cached != NGX_CONF_UNSET_UINT) {
     //如果已经赋值了，说明配置了重复指令
+    if (kcf->max_cached != NGX_CONF_UNSET_UINT) {
         return "is duplicate";
     }
 

@@ -155,6 +155,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
     ngx_cpystrn(cycle->conf_file.data, old_cycle->conf_file.data,
                 old_cycle->conf_file.len + 1);
 
+    /* 配置参数 信息拷贝 如 -g */
     if (old_cycle->conf_param.len) {
         cycle->conf_param.len = old_cycle->conf_param.len;
         cycle->conf_param.data = ngx_pstrdup(pool, &old_cycle->conf_param);
@@ -162,7 +163,6 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
             ngx_destroy_pool(pool);
             return NULL;
         }
-    /* 配置参数 信息拷贝 如 -g */
     }
 
 

@@ -177,7 +177,6 @@ ngx_proxy_protocol_read(ngx_connection_t *c, u_char *buf, u_char *last)
     u_char                *p;
     ngx_proxy_protocol_t  *pp;
 
-    // v2 固定的signature
     p = buf;
     len = last - buf;
 

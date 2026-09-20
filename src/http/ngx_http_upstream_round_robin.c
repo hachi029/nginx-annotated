@@ -821,6 +821,10 @@ ngx_http_upstream_get_round_robin_peer(ngx_peer_connection_t *pc, void *data)
     }
 #endif
 
+    /*
+     * 检查 ngx_http_upstream_rr_peers_t 结构体中的 single 标志位;
+     * 若 single 标志位为 1，表示只有一台非备用后端服务器，不用选
+     */
     if (peers->single) {
 #if (NGX_HTTP_UPSTREAM_SID)
         peer = ngx_http_upstream_get_rr_peer_by_sid(rrp, pc->hint, &i, 0);
@@ -837,10 +841,6 @@ ngx_http_upstream_get_round_robin_peer(ngx_peer_connection_t *pc, void *data)
                 goto failed;
             }
 #if (NGX_HTTP_UPSTREAM_SID)
-    /*
-     * 检查 ngx_http_upstream_rr_peers_t 结构体中的 single 标志位;
-     * 若 single 标志位为 1，表示只有一台非备用后端服务器，不用选
-     */
         }
 #endif
 

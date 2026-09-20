@@ -333,6 +333,7 @@ ngx_http_autoindex_handler(ngx_http_request_t *r)
         goto failed;
     }
 
+    //初始化entries动态数组
     if (ngx_array_init(&entries, pool, 40, sizeof(ngx_http_autoindex_entry_t))
         != NGX_OK)
     {

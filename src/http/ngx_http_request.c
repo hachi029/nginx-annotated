@@ -2321,6 +2321,7 @@ ngx_http_process_host(ngx_http_request_t *r, ngx_table_elt_t *h,
 
     host = h->value;
 
+    //校验host是否合法（如是否包含..或/等 ）
     rc = ngx_http_validate_host(&host, &port, r->pool, 0);
 
     //host请求头不合法

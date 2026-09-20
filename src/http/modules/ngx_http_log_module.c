@@ -431,13 +431,14 @@ ngx_http_log_handler(ngx_http_request_t *r)
             p = ngx_syslog_add_header(log[l].syslog_peer, line);
         }
 
+        //构建日志
         for (i = 0; i < log[l].format->ops->nelts && p; i++) {
             p = op[i].run(r, p, end, &op[i]);
         }
 
         if (p == NULL) {
             return NGX_ERROR;
-        //构建日志
+
         }
 
         //发送至syslog

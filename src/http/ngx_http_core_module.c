@@ -885,15 +885,15 @@ ngx_http_handler(ngx_http_request_t *r)
 
         if (r->method != NGX_HTTP_CONNECT) {
             switch (r->headers_in.connection_type) {
-            case 0:
+            case 0:     //未设置connection_type
                 r->keepalive = (r->http_version > NGX_HTTP_VERSION_10);
                 break;
 
-            case NGX_HTTP_CONNECTION_CLOSE:
+            case NGX_HTTP_CONNECTION_CLOSE:     //如果设置了connection_type为close
                 r->keepalive = 0;
                 break;
 
-            case NGX_HTTP_CONNECTION_KEEP_ALIVE:
+            case NGX_HTTP_CONNECTION_KEEP_ALIVE:    //如果设置了connection_type为keep-alive
                 r->keepalive = 1;
                 break;
             }
@@ -1333,6 +1333,7 @@ ngx_http_core_access_phase(ngx_http_request_t *r, ngx_http_phase_handler_t *ph)
             return NGX_AGAIN;
         }
 
+        //当前handler认为无权限，仍需查看其他handler执行结果
         if (rc == NGX_HTTP_FORBIDDEN
             || rc == NGX_HTTP_UNAUTHORIZED
             || rc == NGX_HTTP_PROXY_AUTH_REQUIRED)
@@ -1340,7 +1341,7 @@ ngx_http_core_access_phase(ngx_http_request_t *r, ngx_http_phase_handler_t *ph)
             if (r->access_code != NGX_HTTP_UNAUTHORIZED
                 && r->access_code != NGX_HTTP_PROXY_AUTH_REQUIRED)
             {
-        //当前handler认为无权限，仍需查看其他handler执行结果
+
                 r->access_code = rc;
             }
 
@@ -1351,10 +1352,11 @@ ngx_http_core_access_phase(ngx_http_request_t *r, ngx_http_phase_handler_t *ph)
 
     /* rc == NGX_ERROR || rc == NGX_HTTP_...  */
 
+    //拒绝访问
     if (rc == NGX_HTTP_UNAUTHORIZED || rc == NGX_HTTP_PROXY_AUTH_REQUIRED) {
         r->access_code = rc;
     /* rc == NGX_ERROR || rc == NGX_HTTP_...  */
-    //拒绝访问
+
         return ngx_http_core_auth_delay(r);
     }
 

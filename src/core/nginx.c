@@ -316,6 +316,10 @@ main(int argc, char *const *argv)
         }
     }
 
+
+    // 在ngx_os_init函数里设置（os/unix/ngx_posix_init.c）
+    // 使用系统调用getrlimit(RLIMIT_NOFILE, &rlmt)
+    // 是nginx能够打开的最多描述数量，但似乎并没有使用
     /* TODO */ ngx_max_sockets = -1;
 
     // ngx_times.c,初始化各个全局cache时间变量
